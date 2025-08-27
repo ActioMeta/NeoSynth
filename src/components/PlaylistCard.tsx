@@ -8,7 +8,6 @@ export type PlaylistCardProps = {
   trackCount: number;
   onPlay: () => void;
   onAddToQueue: () => void;
-  onDownload: () => void;
   onAddToPlaylist: () => void;
   onPress: () => void;
 };
@@ -18,7 +17,6 @@ const PlaylistCard: React.FC<PlaylistCardProps> = ({
   trackCount,
   onPlay,
   onAddToQueue,
-  onDownload,
   onAddToPlaylist,
   onPress,
 }) => {
@@ -26,7 +24,6 @@ const PlaylistCard: React.FC<PlaylistCardProps> = ({
   const menuOptions: ItemMenuOption[] = [
     { label: 'Reproducir', icon: 'play', onPress: () => onPlay() },
     { label: 'Agregar a la cola', icon: 'add', onPress: () => onAddToQueue() },
-    { label: 'Descargar', icon: 'download', onPress: () => onDownload() },
     { label: 'Agregar a playlist', icon: 'list', onPress: () => onAddToPlaylist() },
   ];
   return (

@@ -1,23 +1,30 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
+import { Ionicons, Feather } from '@expo/vector-icons';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import TrackCard from '../components/TrackCard';
+import ItemMenu from '../components/ItemMenu';
 import { useAppStore } from '../store/appStore';
-import { getPlaylistPaginated, streamUrl } from '../services/subsonic';
+import { getPlaylistPaginated, streamUrl, getCoverArtUrl } from '../services/subsonic';
+import { audioPlayer } from '../services/audioPlayer';
+import { addTrackToPlaylist } from '../database/playlists';
+import { DownloadService } from '../services/download';
 
 const ITEMS_PER_PAGE = 50;
+const downloadService = DownloadService.getInstance();
 
 export default function PlaylistDetailScreen({ route, navigation }: any) {
   const { playlist } = route.params;
   const currentServer = useAppStore(s => s.currentServer);
   const addToQueue = useAppStore(s => s.addToQueue);
   const setPlayerState = useAppStore(s => s.setPlayerState);
+  const insets = useSafeAreaInsets();
   const [tracks, setTracks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [currentPage, setCurrentPage] = useState(0);
+  const [showMenu, setShowMenu] = useState(false);
   const [playlistInfo, setPlaylistInfo] = useState(playlist);
 
   useEffect(() => {
@@ -80,24 +87,37 @@ export default function PlaylistDetailScreen({ route, navigation }: any) {
   };
 
   const handlePlayTrack = async (track: any, index: number) => {
-    if (!currentServer) return;
+    console.log('PlaylistDetailScreen: handlePlayTrack called with:', { track: track.title, index });
+    
+    if (!currentServer) {
+      console.log('PlaylistDetailScreen: No current server available');
+      return;
+    }
     
     try {
+      console.log('PlaylistDetailScreen: Getting stream URL for track:', track.id);
       const url = await streamUrl(currentServer, track.id);
-      setPlayerState({ 
-        currentTrack: {
-          id: track.id,
-          title: track.title,
-          artist: track.artist,
-          album: track.album,
-          duration: track.duration || 0,
-          url,
-          isOffline: false,
-        }, 
-        isPlaying: true 
-      });
+      console.log('PlaylistDetailScreen: Got stream URL:', url);
+      
+      const coverArtUrl = track.coverArt && currentServer ? getCoverArtUrl(currentServer, track.coverArt) : undefined;
+      
+      const trackData = {
+        id: track.id,
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        duration: track.duration || 0,
+        url,
+        isOffline: false,
+        coverArt: coverArtUrl,
+      };
+      
+      console.log('PlaylistDetailScreen: Setting player state and playing track...');
+      setPlayerState({ currentTrack: trackData, isPlaying: true });
+      await audioPlayer.playTrack(trackData);
+      console.log('PlaylistDetailScreen: Track started playing successfully');
     } catch (error) {
-      console.error('Error playing track:', error);
+      console.error('PlaylistDetailScreen: Error playing track:', error);
     }
   };
 
@@ -120,11 +140,32 @@ export default function PlaylistDetailScreen({ route, navigation }: any) {
     }
   };
 
-  const handlePlayAll = () => {
-    if (tracks.length > 0) {
-      handlePlayTrack(tracks[0], 0);
-      // Agregar el resto a la cola
-      tracks.slice(1).forEach(track => handleAddTrackToQueue(track));
+  const handlePlayAll = async () => {
+    if (tracks.length === 0 || !currentServer) return;
+    
+    try {
+      // Preparar todas las canciones con URLs
+      const trackList = await Promise.all(
+        tracks.map(async (track) => {
+          const url = await streamUrl(currentServer, track.id);
+          return {
+            id: track.id,
+            title: track.title,
+            artist: track.artist,
+            album: track.album,
+            duration: track.duration || 0,
+            url,
+            isOffline: false,
+            coverArt: track.coverArt,
+            albumId: track.albumId,
+          };
+        })
+      );
+      
+      // Reproducir toda la lista, esto limpiará la cola actual
+      await audioPlayer.playTrackList(trackList);
+    } catch (error) {
+      console.error('Error playing all tracks:', error);
     }
   };
 
@@ -132,11 +173,71 @@ export default function PlaylistDetailScreen({ route, navigation }: any) {
     tracks.forEach(track => handleAddTrackToQueue(track));
   };
 
-  const handleShuffle = () => {
-    if (tracks.length > 0) {
-      const shuffled = [...tracks].sort(() => Math.random() - 0.5);
-      handlePlayTrack(shuffled[0], 0);
-      shuffled.slice(1).forEach(track => handleAddTrackToQueue(track));
+  const handlePlayShuffle = async () => {
+    if (tracks.length === 0 || !currentServer) return;
+    
+    try {
+      // Preparar todas las canciones con URLs
+      const trackList = await Promise.all(
+        tracks.map(async (track) => {
+          const url = await streamUrl(currentServer, track.id);
+          return {
+            id: track.id,
+            title: track.title,
+            artist: track.artist,
+            album: track.album,
+            duration: track.duration || 0,
+            url,
+            isOffline: false,
+            coverArt: track.coverArt,
+            albumId: track.albumId,
+          };
+        })
+      );
+      
+      // Mezclar la lista antes de reproducir
+      const shuffledTracks = [...trackList].sort(() => Math.random() - 0.5);
+      
+      // Reproducir la lista mezclada
+      await audioPlayer.playTrackList(shuffledTracks);
+    } catch (error) {
+      console.error('Error playing shuffled playlist:', error);
+    }
+  };
+
+  const handleDownloadPlaylist = async () => {
+    if (!currentServer) return;
+    
+    try {
+      console.log('Iniciando descarga de playlist:', playlist.name);
+      
+      // Obtener todas las canciones de la playlist
+      const playlistTracks = tracks.map(track => ({
+        ...track,
+        url: `${currentServer.url}/rest/stream?id=${track.id}&u=${currentServer.username}&p=${currentServer.password}&v=1.12.0&c=neosynth`,
+      }));
+      
+      // Usar el DownloadService para descargar toda la playlist
+      await downloadService.downloadPlaylist(
+        playlistTracks,
+        currentServer,
+        playlist.id,
+        (overall: number, current: any) => {
+          console.log(`Progreso general: ${Math.round(overall * 100)}%, Canción actual: ${current.trackId}`);
+        }
+      );
+      
+      console.log('Playlist descargada exitosamente');
+      Alert.alert(
+        'Descarga completada',
+        `La playlist "${playlist.name}" se ha descargado para uso offline.`
+      );
+    } catch (error) {
+      console.error('Error descargando playlist:', error);
+      Alert.alert(
+        'Error',
+        'No se pudo descargar la playlist. Inténtalo de nuevo.'
+      );
     }
   };
 
@@ -154,6 +255,28 @@ export default function PlaylistDetailScreen({ route, navigation }: any) {
     }
   }, [loadingMore, hasMore, currentPage]);
 
+  const handleAddTrackToPlaylist = async (playlistId: string, playlistName: string, track: any) => {
+    try {
+      const trackData = {
+        id: track.id,
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        duration: (track.duration || 0) * 1000, // Convertir a millisegundos
+        url: await streamUrl(currentServer!, track.id),
+        isOffline: false,
+        localPath: undefined
+      };
+      
+      await addTrackToPlaylist(playlistId, trackData);
+      console.log(`Track "${track.title}" added to playlist "${playlistName}"`);
+      // TODO: Mostrar mensaje de éxito al usuario
+    } catch (error) {
+      console.error('Error adding track to playlist:', error);
+      // TODO: Mostrar mensaje de error al usuario
+    }
+  };
+
   const renderTrackItem = ({ item, index }: { item: any; index: number }) => (
     <TrackCard
       key={`${item.id}-${index}`}
@@ -165,8 +288,9 @@ export default function PlaylistDetailScreen({ route, navigation }: any) {
       onPlay={() => handlePlayTrack(item, index)}
       onAddToQueue={() => handleAddTrackToQueue(item)}
       onDownload={() => {}}
-      onAddToPlaylist={() => {}}
+      onAddToPlaylist={(playlistId, playlistName) => handleAddTrackToPlaylist(playlistId, playlistName, item)}
       onPress={() => handlePlayTrack(item, index)}
+      track={item}
     />
   );
 
@@ -192,12 +316,12 @@ export default function PlaylistDetailScreen({ route, navigation }: any) {
       {/* Action Buttons */}
       <View style={styles.actionButtons}>
         <TouchableOpacity style={styles.playButton} onPress={handlePlayAll}>
-          <Ionicons name="play" size={20} color="#fff" />
+          <Feather name="play" size={20} color="#fff" />
           <Text style={styles.playButtonText}>Reproducir</Text>
         </TouchableOpacity>
         
-        <TouchableOpacity style={styles.shuffleButton} onPress={handleShuffle}>
-          <Ionicons name="shuffle" size={20} color="#5752D7" />
+        <TouchableOpacity style={styles.shuffleButton} onPress={handlePlayShuffle}>
+          <Feather name="shuffle" size={20} color="#5752D7" />
           <Text style={styles.shuffleButtonText}>Aleatorio</Text>
         </TouchableOpacity>
       </View>
@@ -210,7 +334,7 @@ export default function PlaylistDetailScreen({ route, navigation }: any) {
   );
 
   const renderListFooter = () => {
-    if (!loadingMore) return null;
+    if (!loadingMore) return <></>;
     return (
       <View style={styles.loadingFooter}>
         <ActivityIndicator color="#5752D7" size="small" />
@@ -230,11 +354,11 @@ export default function PlaylistDetailScreen({ route, navigation }: any) {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+          <Feather name="arrow-left" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Playlist</Text>
-        <TouchableOpacity>
-          <Ionicons name="ellipsis-horizontal" size={24} color="#fff" />
+        <TouchableOpacity onPress={() => setShowMenu(true)}>
+          <Feather name="more-horizontal" size={24} color="#fff" />
         </TouchableOpacity>
       </View>
 
@@ -254,6 +378,33 @@ export default function PlaylistDetailScreen({ route, navigation }: any) {
           style={{ flex: 1 }}
         />
       )}
+
+      <ItemMenu
+        visible={showMenu}
+        onClose={() => setShowMenu(false)}
+        anchorPosition={{
+          top: insets.top + 12, // SafeArea top + padding del header
+          left: 0 // Usaremos right en el menú
+        }}
+        options={[
+          {
+            label: 'Agregar a cola',
+            icon: 'list',
+            onPress: () => {
+              handleAddAllToQueue();
+              setShowMenu(false);
+            }
+          },
+          {
+            label: 'Descargar playlist',
+            icon: 'download',
+            onPress: () => {
+              handleDownloadPlaylist();
+              setShowMenu(false);
+            }
+          }
+        ]}
+      />
     </SafeAreaView>
   );
 }

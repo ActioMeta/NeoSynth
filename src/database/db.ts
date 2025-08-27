@@ -13,10 +13,12 @@ export const getDBConnection = async (): Promise<SQLite.SQLiteDatabase> => {
   return dbInstance;
 };
 
+// Exportamos la instancia de la base de datos para uso directo
+export const database = getDBConnection();
+
 // Inicializa la base de datos y crea las tablas si no existen
 export const initDatabase = async (): Promise<void> => {
   const db = await getDBConnection();
-  // withTransactionAsync no recibe argumentos, se usa el propio db
   await db.withTransactionAsync(async () => {
     await db.execAsync(`CREATE TABLE IF NOT EXISTS servers (
       id TEXT PRIMARY KEY NOT NULL,
@@ -41,6 +43,18 @@ export const initDatabase = async (): Promise<void> => {
       isOffline INTEGER,
       localPath TEXT,
       FOREIGN KEY (playlistId) REFERENCES playlists(id)
+    );`);
+    
+    // Tabla para canciones offline
+    await db.execAsync(`CREATE TABLE IF NOT EXISTS offline_tracks (
+      id TEXT PRIMARY KEY NOT NULL,
+      title TEXT,
+      artist TEXT,
+      album TEXT,
+      albumId TEXT,
+      filePath TEXT,
+      duration INTEGER,
+      coverArt TEXT
     );`);
   });
 };

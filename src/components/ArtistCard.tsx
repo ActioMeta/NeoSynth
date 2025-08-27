@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Feather } from '@expo/vector-icons';
 
 export type ArtistCardProps = {
   name: string;
@@ -18,7 +18,7 @@ const ArtistCard: React.FC<ArtistCardProps> = ({ name, imageUrl, onPress }) => (
       />
     ) : (
       <View style={[styles.image, styles.placeholder]}>
-        <Ionicons name="person" size={40} color="#5752D7" />
+        <Feather name="user" size={40} color="#5752D7" />
       </View>
     )}
     <Text style={styles.name} numberOfLines={1}>{name}</Text>

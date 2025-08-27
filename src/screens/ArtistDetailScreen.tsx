@@ -6,6 +6,7 @@ import AlbumCard from '../components/AlbumCard';
 import TrackCard from '../components/TrackCard';
 import { useAppStore } from '../store/appStore';
 import { subsonicRequest, streamUrl } from '../services/subsonic';
+import { audioPlayer } from '../services/audioPlayer';
 
 export default function ArtistDetailScreen({ route, navigation }: any) {
   const { artist } = route.params;
@@ -61,18 +62,18 @@ export default function ArtistDetailScreen({ route, navigation }: any) {
     
     try {
       const url = await streamUrl(currentServer, track.id);
-      setPlayerState({ 
-        currentTrack: {
-          id: track.id,
-          title: track.title,
-          artist: track.artist,
-          album: track.album,
-          duration: track.duration || 0,
-          url,
-          isOffline: false,
-        }, 
-        isPlaying: true 
-      });
+      const trackData = {
+        id: track.id,
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        duration: track.duration || 0,
+        url,
+        isOffline: false,
+      };
+      
+      setPlayerState({ currentTrack: trackData, isPlaying: true });
+      await audioPlayer.playTrack(trackData);
     } catch (error) {
       console.error('Error playing track:', error);
     }

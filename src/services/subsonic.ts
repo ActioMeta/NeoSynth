@@ -57,6 +57,18 @@ export async function getPlaylistPaginated(auth: SubsonicAuth, playlistId: strin
   });
 }
 
+export async function getArtists(auth: SubsonicAuth) {
+  return subsonicRequest(auth, 'getArtists.view');
+}
+
+export async function getGenres(auth: SubsonicAuth) {
+  return subsonicRequest(auth, 'getGenres.view');
+}
+
+export async function getAlbum(auth: SubsonicAuth, albumId: string) {
+  return subsonicRequest(auth, 'getAlbum.view', { id: albumId });
+}
+
 export async function getAlbumPaginated(auth: SubsonicAuth, albumId: string, offset = 0, limit = 50) {
   return subsonicRequest(auth, 'getAlbum.view', { 
     id: albumId,
@@ -72,4 +84,32 @@ export async function getMusicDirectory(auth: SubsonicAuth, id: string) {
 export async function streamUrl(auth: SubsonicAuth, id: string) {
   // Devuelve la URL directa para streaming
   return `${auth.url}/rest/stream.view?u=${auth.username}&p=${auth.password}&v=1.16.1&c=neosynth&f=json&id=${id}`;
+}
+
+export function getCoverArtUrl(auth: SubsonicAuth, coverArtId: string): string {
+  const params = new URLSearchParams({
+    u: auth.username,
+    p: auth.password,
+    v: '1.16.1',
+    c: 'neosynth',
+    f: 'json',
+    id: coverArtId,
+    size: '300'
+  });
+  
+  return `${auth.url}/rest/getCoverArt?${params.toString()}`;
+}
+
+export function getArtistImageUrl(auth: SubsonicAuth, artistId: string): string {
+  const params = new URLSearchParams({
+    u: auth.username,
+    p: auth.password,
+    v: '1.16.1',
+    c: 'neosynth',
+    f: 'json',
+    id: artistId,
+    size: '300'
+  });
+  
+  return `${auth.url}/rest/getArtistInfo?${params.toString()}`;
 }

@@ -24,7 +24,16 @@ export default function ItemMenu({ visible, onClose, options, anchorPosition }: 
       onRequestClose={onClose}
     >
       <Pressable style={styles.overlay} onPress={onClose} />
-      <View style={[styles.menu, anchorPosition && { top: anchorPosition.top, left: anchorPosition.left }]}> 
+      <View style={[
+        styles.menu,
+        anchorPosition ? {
+          top: anchorPosition.top + 8, // Muy cerca del ícono
+          right: 16, // Un poco más hacia el centro
+        } : {
+          right: 16,
+          top: 80, // Más arriba que antes
+        }
+      ]}> 
         {options.map((opt, i) => (
           <TouchableOpacity key={i} style={styles.menuItem} onPress={() => { onClose(); opt.onPress(); }}>
             <Ionicons name={opt.icon as any} size={20} color="#5752D7" style={{ marginRight: 12 }} />
@@ -43,8 +52,8 @@ const styles = StyleSheet.create({
   },
   menu: {
     position: 'absolute',
-    right: 24,
-    top: 120,
+    right: 16, // Reducido de 24 a 16
+    top: 80, // Reducido de 120 a 80
     backgroundColor: '#181818',
     borderRadius: 12,
     paddingVertical: 8,

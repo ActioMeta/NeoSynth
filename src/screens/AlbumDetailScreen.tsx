@@ -1,19 +1,26 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, ActivityIndicator, Alert } from 'react-native';
+import { Ionicons, Feather } from '@expo/vector-icons';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import TrackCard from '../components/TrackCard';
+import ItemMenu from '../components/ItemMenu';
+import DownloadButton from '../components/DownloadButton';
 import { useAppStore } from '../store/appStore';
-import { subsonicRequest, streamUrl } from '../services/subsonic';
+import { getMusicDirectory, streamUrl, subsonicRequest, getCoverArtUrl } from '../services/subsonic';
+import { audioPlayer } from '../services/audioPlayer';
+import { addTrackToPlaylist } from '../database/playlists';
+import { DownloadService } from '../services/download';
 
 export default function AlbumDetailScreen({ route, navigation }: any) {
   const { album, action } = route.params;
   const currentServer = useAppStore(s => s.currentServer);
   const addToQueue = useAppStore(s => s.addToQueue);
   const setPlayerState = useAppStore(s => s.setPlayerState);
+  const insets = useSafeAreaInsets();
   const [tracks, setTracks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [albumInfo, setAlbumInfo] = useState(album);
+  const [showMenu, setShowMenu] = useState(false);
 
   useEffect(() => {
     if (!currentServer || !album.id) return;
@@ -43,22 +50,37 @@ export default function AlbumDetailScreen({ route, navigation }: any) {
   };
 
   const handlePlayTrack = async (track: any, index: number) => {
-    if (!currentServer) return;
+    console.log('handlePlayTrack called with:', { track: track.title, index });
+    
+    if (!currentServer) {
+      console.log('No current server available');
+      return;
+    }
     
     try {
+      console.log('Getting stream URL for track:', track.id);
       const url = await streamUrl(currentServer, track.id);
-      setPlayerState({ 
-        currentTrack: {
-          id: track.id,
-          title: track.title,
-          artist: track.artist,
-          album: track.album,
-          duration: track.duration || 0,
-          url,
-          isOffline: false,
-        }, 
-        isPlaying: true 
-      });
+      console.log('Got stream URL:', url);
+      
+      const coverArtId = track.coverArt || albumInfo?.coverArt;
+      const coverArtUrl = coverArtId && currentServer ? getCoverArtUrl(currentServer, coverArtId) : undefined;
+      
+      const trackData = {
+        id: track.id,
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        duration: track.duration || 0,
+        url,
+        isOffline: false,
+        coverArt: coverArtUrl,
+        albumId: track.albumId || albumInfo?.id,
+      };
+      
+      console.log('Setting player state and playing track...');
+      setPlayerState({ currentTrack: trackData, isPlaying: true });
+      await audioPlayer.playTrack(trackData);
+      console.log('Track started playing successfully');
     } catch (error) {
       console.error('Error playing track:', error);
     }
@@ -83,16 +105,122 @@ export default function AlbumDetailScreen({ route, navigation }: any) {
     }
   };
 
-  const handlePlayAll = () => {
-    if (tracks.length > 0) {
-      handlePlayTrack(tracks[0], 0);
-      // Agregar el resto a la cola
-      tracks.slice(1).forEach(track => handleAddTrackToQueue(track));
+  const handlePlayAll = async () => {
+    if (tracks.length === 0 || !currentServer) return;
+    
+    try {
+      // Preparar todas las canciones con URLs
+      const trackList = await Promise.all(
+        tracks.map(async (track) => {
+          const url = await streamUrl(currentServer, track.id);
+          return {
+            id: track.id,
+            title: track.title,
+            artist: track.artist,
+            album: track.album,
+            duration: track.duration || 0,
+            url,
+            isOffline: false,
+            coverArt: track.coverArt,
+            albumId: track.albumId || albumInfo?.id,
+          };
+        })
+      );
+      
+      // Reproducir toda la lista, esto limpiará la cola actual
+      await audioPlayer.playTrackList(trackList);
+    } catch (error) {
+      console.error('Error playing all tracks:', error);
     }
   };
 
   const handleAddAllToQueue = () => {
     tracks.forEach(track => handleAddTrackToQueue(track));
+  };
+
+  const handlePlayShuffle = async () => {
+    if (tracks.length === 0 || !currentServer) return;
+    
+    try {
+      // Preparar todas las canciones con URLs
+      const trackList = await Promise.all(
+        tracks.map(async (track) => {
+          const url = await streamUrl(currentServer, track.id);
+          return {
+            id: track.id,
+            title: track.title,
+            artist: track.artist,
+            album: track.album,
+            duration: track.duration || 0,
+            url,
+            isOffline: false,
+            coverArt: track.coverArt,
+            albumId: track.albumId || albumInfo?.id,
+          };
+        })
+      );
+      
+      // Mezclar la lista antes de reproducir
+      const shuffledTracks = [...trackList].sort(() => Math.random() - 0.5);
+      
+      // Reproducir la lista mezclada
+      await audioPlayer.playTrackList(shuffledTracks);
+    } catch (error) {
+      console.error('Error playing shuffled album:', error);
+    }
+  };
+
+  const handleDownloadAlbum = async () => {
+    if (!currentServer || tracks.length === 0) return;
+    
+    Alert.alert(
+      'Descargar Álbum',
+      `¿Deseas descargar "${albumInfo.name}" completo para reproducción offline? (${tracks.length} canciones)`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Descargar',
+          onPress: async () => {
+            try {
+              const downloadService = DownloadService.getInstance();
+              
+              // Preparar tracks para descarga
+              const albumTracks = await Promise.all(
+                tracks.map(async (track) => {
+                  const url = await streamUrl(currentServer!, track.id);
+                  return {
+                    id: track.id,
+                    title: track.title,
+                    artist: track.artist,
+                    album: track.album,
+                    duration: (track.duration || 0) * 1000,
+                    url,
+                    isOffline: false,
+                    localPath: undefined,
+                    coverArt: track.coverArt || albumInfo.coverArt,
+                    albumId: albumInfo.id,
+                  };
+                })
+              );
+
+              await downloadService.downloadAlbum(
+                albumTracks,
+                currentServer,
+                albumInfo.id,
+                (overall, current) => {
+                  console.log(`Descarga del álbum: ${Math.round(overall * 100)}% - ${current.trackId}: ${Math.round(current.progress * 100)}%`);
+                }
+              );
+
+              Alert.alert('Descarga Completa', `El álbum "${albumInfo.name}" se ha descargado correctamente.`);
+            } catch (error) {
+              console.error('Error downloading album:', error);
+              Alert.alert('Error', 'No se pudo descargar el álbum completo');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const formatDuration = (seconds: number) => {
@@ -102,6 +230,28 @@ export default function AlbumDetailScreen({ route, navigation }: any) {
   };
 
   const totalDuration = tracks.reduce((total, track) => total + (track.duration || 0), 0);
+
+  const handleAddTrackToPlaylist = async (playlistId: string, playlistName: string, track: any) => {
+    try {
+      const trackData = {
+        id: track.id,
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        duration: (track.duration || 0) * 1000, // Convertir a millisegundos
+        url: await streamUrl(currentServer!, track.id),
+        isOffline: false,
+        localPath: undefined
+      };
+      
+      await addTrackToPlaylist(playlistId, trackData);
+      console.log(`Track "${track.title}" added to playlist "${playlistName}"`);
+      // TODO: Mostrar mensaje de éxito al usuario
+    } catch (error) {
+      console.error('Error adding track to playlist:', error);
+      // TODO: Mostrar mensaje de error al usuario
+    }
+  };
 
   const renderTrackItem = ({ item, index }: { item: any; index: number }) => (
     <TrackCard
@@ -114,8 +264,9 @@ export default function AlbumDetailScreen({ route, navigation }: any) {
       onPlay={() => handlePlayTrack(item, index)}
       onAddToQueue={() => handleAddTrackToQueue(item)}
       onDownload={() => {}}
-      onAddToPlaylist={() => {}}
+      onAddToPlaylist={(playlistId, playlistName) => handleAddTrackToPlaylist(playlistId, playlistName, item)}
       onPress={() => handlePlayTrack(item, index)}
+      track={item}
     />
   );
 
@@ -151,13 +302,13 @@ export default function AlbumDetailScreen({ route, navigation }: any) {
       {/* Action Buttons */}
       <View style={styles.actionButtons}>
         <TouchableOpacity style={styles.playButton} onPress={handlePlayAll}>
-          <Ionicons name="play" size={20} color="#fff" />
+          <Feather name="play" size={20} color="#fff" />
           <Text style={styles.playButtonText}>Reproducir</Text>
         </TouchableOpacity>
         
-        <TouchableOpacity style={styles.queueButton} onPress={handleAddAllToQueue}>
-          <Ionicons name="add" size={20} color="#5752D7" />
-          <Text style={styles.queueButtonText}>Agregar a cola</Text>
+        <TouchableOpacity style={styles.shuffleButton} onPress={handlePlayShuffle}>
+          <Feather name="shuffle" size={20} color="#5752D7" />
+          <Text style={styles.shuffleButtonText}>Aleatorio</Text>
         </TouchableOpacity>
       </View>
 
@@ -173,79 +324,53 @@ export default function AlbumDetailScreen({ route, navigation }: any) {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+          <Feather name="arrow-left" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Álbum</Text>
-        <TouchableOpacity>
-          <Ionicons name="ellipsis-horizontal" size={24} color="#fff" />
+        <TouchableOpacity onPress={() => setShowMenu(true)}>
+          <Feather name="more-horizontal" size={24} color="#fff" />
         </TouchableOpacity>
       </View>
 
       {loading ? (
         <ActivityIndicator color="#5752D7" size="large" style={{ marginTop: 32 }} />
       ) : (
-        <ScrollView>
-          {/* Album Info */}
-          <View style={styles.albumInfo}>
-            {albumInfo.coverArt ? (
-              <Image 
-                source={{ 
-                  uri: `${currentServer?.url}/rest/getCoverArt.view?id=${albumInfo.coverArt}&u=${currentServer?.username}&p=${currentServer?.password}&v=1.16.1&c=neosynth&size=300` 
-                }}
-                style={styles.albumCover}
-              />
-            ) : (
-              <View style={[styles.albumCover, styles.placeholderCover]}>
-                <Ionicons name="musical-notes" size={60} color="#666" />
-              </View>
-            )}
-            
-            <View style={styles.albumDetails}>
-              <Text style={styles.albumTitle}>{albumInfo.name}</Text>
-              <Text style={styles.albumArtist}>{albumInfo.artist}</Text>
-              <Text style={styles.albumMeta}>
-                {tracks.length} canciones • {formatDuration(totalDuration)}
-              </Text>
-              {albumInfo.year && (
-                <Text style={styles.albumYear}>{albumInfo.year}</Text>
-              )}
-            </View>
-          </View>
-
-          {/* Action Buttons */}
-          <View style={styles.actionButtons}>
-            <TouchableOpacity style={styles.playButton} onPress={handlePlayAll}>
-              <Ionicons name="play" size={20} color="#fff" />
-              <Text style={styles.playButtonText}>Reproducir</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.queueButton} onPress={handleAddAllToQueue}>
-              <Ionicons name="add" size={20} color="#5752D7" />
-              <Text style={styles.queueButtonText}>Agregar a cola</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Track List */}
-          <View style={styles.trackList}>
-            <Text style={styles.trackListTitle}>Canciones</Text>
-            {tracks.map((track, index) => (
-              <TrackCard
-                key={track.id}
-                title={track.title}
-                artist={track.artist}
-                album={track.album}
-                duration={track.duration}
-                trackNumber={track.track || index + 1}
-                onPlay={() => handlePlayTrack(track, index)}
-                onAddToQueue={() => handleAddTrackToQueue(track)}
-                onDownload={() => {}}
-                onAddToPlaylist={() => {}}
-                onPress={() => handlePlayTrack(track, index)}
-              />
-            ))}
-          </View>
-        </ScrollView>
+        <FlatList
+          data={tracks}
+          renderItem={renderTrackItem}
+          keyExtractor={(item, index) => `${item.id}-${index}`}
+          ListHeaderComponent={renderListHeader}
+          showsVerticalScrollIndicator={false}
+          style={{ flex: 1 }}
+        />
       )}
+
+      <ItemMenu
+        visible={showMenu}
+        onClose={() => setShowMenu(false)}
+        anchorPosition={{
+          top: insets.top + 12, // SafeArea top + padding del header
+          left: 0 // Usaremos right en el menú
+        }}
+        options={[
+          {
+            label: 'Agregar a cola',
+            icon: 'list',
+            onPress: () => {
+              handleAddAllToQueue();
+              setShowMenu(false);
+            }
+          },
+          {
+            label: 'Descargar álbum',
+            icon: 'download',
+            onPress: () => {
+              handleDownloadAlbum();
+              setShowMenu(false);
+            }
+          }
+        ]}
+      />
     </SafeAreaView>
   );
 }
@@ -326,7 +451,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold', 
     fontSize: 16 
   },
-  queueButton: { 
+  shuffleButton: { 
     flex: 1, 
     borderWidth: 1, 
     borderColor: '#5752D7', 
@@ -337,13 +462,17 @@ const styles = StyleSheet.create({
     borderRadius: 24, 
     gap: 8 
   },
-  queueButtonText: { 
+  shuffleButtonText: { 
     color: '#5752D7', 
     fontWeight: 'bold', 
     fontSize: 16 
   },
   trackList: { 
     paddingHorizontal: 16 
+  },
+  trackListHeader: {
+    paddingHorizontal: 16,
+    marginBottom: 8,
   },
   trackListTitle: { 
     fontSize: 18, 

@@ -98,6 +98,7 @@ export async function getRecentSongs(auth: SubsonicAuth, count = 20) {
     const response = data['subsonic-response'] || data;
     const songs = response['randomSongs']?.song || [];
     console.log('Recent songs found:', songs.length);
+    console.log('Sample song data:', songs[0]);
     return songs;
   } catch (error) {
     console.error('Error getting recent songs:', error);
