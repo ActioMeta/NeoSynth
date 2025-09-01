@@ -38,7 +38,15 @@ export async function subsonicRequest<T = any>(
 }
 
 export async function pingServer(auth: SubsonicAuth) {
-  return subsonicRequest(auth, 'ping.view');
+  console.log('🏓 Ping server:', auth.url, 'user:', auth.username);
+  try {
+    const result = await subsonicRequest(auth, 'ping.view');
+    console.log('🏓 Ping result:', result);
+    return result;
+  } catch (error) {
+    console.error('🏓 Ping failed:', error);
+    throw error;
+  }
 }
 
 export async function getPlaylists(auth: SubsonicAuth) {

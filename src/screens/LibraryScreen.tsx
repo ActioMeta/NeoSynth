@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, RefreshControl } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { useAppStore } from '../store/appStore';
 import ServerSelector from '../components/ServerSelector';
 import ArtistCard from '../components/ArtistCard';
@@ -14,6 +15,7 @@ import { audioPlayer } from '../services/audioPlayer';
 export default function LibraryScreen({ navigation }: any) {
   const currentServer = useAppStore(s => s.currentServer);
   const servers = useAppStore(s => s.servers);
+  const loadServers = useAppStore(s => s.loadServers);
   const { libraryCache, setLibraryCache } = useAppStore();
   const insets = useSafeAreaInsets();
   
@@ -49,6 +51,14 @@ export default function LibraryScreen({ navigation }: any) {
     console.log('🔄 Loading fresh library data');
     loadLibraryData();
   }, [currentServer]);
+  
+  // Recargar servidores cuando la pantalla vuelve a tener foco
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log('🔄 LibraryScreen focused - reloading servers');
+      loadServers();
+    }, [loadServers])
+  );
 
   const onRefresh = async () => {
     setRefreshing(true);

@@ -6,6 +6,17 @@ import type { Server } from '../store/appStore';
 export const addServerToDB = async (server: Omit<Server, 'id'>) => {
   return withDatabaseLock(async () => {
     const db = await database;
+    
+    // Verificar si ya existe un servidor con la misma URL
+    const existingServer = await db.getFirstAsync(
+      'SELECT id FROM servers WHERE url = ?',
+      [server.url]
+    ) as { id: string } | null;
+    
+    if (existingServer) {
+      throw new Error('Ya existe un servidor con esta URL');
+    }
+    
     const id = uuidv4();
     await db.runAsync(
       'INSERT INTO servers (id, name, url, username, password) VALUES (?, ?, ?, ?, ?)',

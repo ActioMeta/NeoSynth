@@ -1215,9 +1215,7 @@ export default function DownloadsScreen({ navigation }: any) {
                 style={[
                   styles.clearButton, 
                   { 
-                    backgroundColor: '#E91E63',
-                    borderWidth: 2,
-                    borderColor: '#AD1457',
+                    backgroundColor: '#000',
                     minWidth: 48,
                     minHeight: 48,
                     justifyContent: 'center',
@@ -1274,7 +1272,66 @@ export default function DownloadsScreen({ navigation }: any) {
                   );
                 }}
               >
-                <Feather name="database" size={20} color="#FFF" />
+                <Feather name="database" size={20} color="#5752D7" />
+              </TouchableOpacity>
+            )}
+            
+            {/* Botón de desarrollo para limpiar todos los servidores */}
+            {__DEV__ && (
+              <TouchableOpacity
+                style={[
+                  styles.clearButton, 
+                  { 
+                    backgroundColor: '#000',
+                    minWidth: 48,
+                    minHeight: 48,
+                    justifyContent: 'center',
+                    alignItems: 'center'
+                  }
+                ]}
+                onPress={async () => {
+                  showAlert(
+                    'Limpiar Servidores (DEV)',
+                    'Esto eliminará TODOS los servidores registrados. Solo para desarrollo.',
+                    [
+                      { text: 'Cancelar', style: 'cancel' },
+                      {
+                        text: 'Limpiar Todo',
+                        style: 'destructive',
+                        onPress: async () => {
+                          try {
+                            console.log('🔄 Limpiando todos los servidores...');
+                            
+                            // Importar funciones necesarias
+                            const { database, withDatabaseLock } = await import('../database/db');
+                            const { loadServers, setCurrentServer } = useAppStore.getState();
+                            
+                            // Limpiar todos los servidores
+                            await withDatabaseLock(async () => {
+                              const db = await database;
+                              await db.runAsync('DELETE FROM servers');
+                            });
+                            
+                            // Desseleccionar servidor actual
+                            setCurrentServer(null);
+                            
+                            // Recargar servidores
+                            await loadServers();
+                            
+                            showAlert('Servidores Limpiados', 'Todos los servidores han sido eliminados');
+                            console.log('✅ Todos los servidores eliminados');
+                            
+                          } catch (error) {
+                            console.error('❌ Error limpiando servidores:', error);
+                            showAlert('Error', 'No se pudieron eliminar los servidores');
+                          }
+                        },
+                      },
+                    ]
+                  );
+                }}
+              >
+                <Feather name="server" size={20} color="#FF9800" />
               </TouchableOpacity>
             )}
           </>

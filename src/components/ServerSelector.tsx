@@ -2,6 +2,9 @@ import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal, FlatList } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useAppStore } from '../store/appStore';
+import { removeServerFromDB } from '../database/servers';
+import { useCustomAlert } from '../hooks/useCustomAlert';
+import CustomAlert from '../components/CustomAlert';
 
 type ServerSelectorProps = {
   onAddServer?: () => void;
@@ -9,9 +12,11 @@ type ServerSelectorProps = {
 
 const ServerSelector: React.FC<ServerSelectorProps> = ({ onAddServer }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const { showAlert, alertProps } = useCustomAlert();
   const currentServer = useAppStore(s => s.currentServer);
   const servers = useAppStore(s => s.servers);
   const setCurrentServer = useAppStore(s => s.setCurrentServer);
+  const loadServers = useAppStore(s => s.loadServers);
 
   const displayText = currentServer 
     ? currentServer.name 
@@ -22,6 +27,38 @@ const ServerSelector: React.FC<ServerSelectorProps> = ({ onAddServer }) => {
   const handleServerSelect = (server: any) => {
     setCurrentServer(server);
     setIsOpen(false);
+  };
+
+  const handleDeleteServer = async (serverId: string, serverName: string) => {
+    showAlert(
+      'Eliminar Servidor',
+      `¿Estás seguro de que quieres eliminar "${serverName}"?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await removeServerFromDB(serverId);
+              
+              // Si el servidor eliminado era el actual, desseleccionarlo
+              if (currentServer?.id === serverId) {
+                setCurrentServer(null);
+              }
+              
+              // Recargar la lista de servidores
+              await loadServers();
+              
+              console.log('✅ Servidor eliminado exitosamente');
+            } catch (error) {
+              console.error('❌ Error eliminando servidor:', error);
+              showAlert('Error', 'No se pudo eliminar el servidor');
+            }
+          }
+        }
+      ]
+    );
   };
 
   return (
@@ -71,21 +108,29 @@ const ServerSelector: React.FC<ServerSelectorProps> = ({ onAddServer }) => {
                   data={servers}
                   keyExtractor={item => item.id}
                   renderItem={({ item }) => (
-                    <TouchableOpacity
-                      style={[
-                        styles.serverItem,
-                        currentServer?.id === item.id && styles.selectedItem
-                      ]}
-                      onPress={() => handleServerSelect(item)}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.serverName}>{item.name}</Text>
-                        <Text style={styles.serverUrl}>{item.url}</Text>
-                      </View>
-                      {currentServer?.id === item.id && (
-                        <Feather name="check" size={20} color="#5752D7" />
-                      )}
-                    </TouchableOpacity>
+                    <View style={styles.serverItemContainer}>
+                      <TouchableOpacity
+                        style={[
+                          styles.serverItem,
+                          currentServer?.id === item.id && styles.selectedItem
+                        ]}
+                        onPress={() => handleServerSelect(item)}
+                      >
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.serverName}>{item.name}</Text>
+                          <Text style={styles.serverUrl}>{item.url}</Text>
+                        </View>
+                        {currentServer?.id === item.id && (
+                          <Feather name="check" size={20} color="#5752D7" />
+                        )}
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.deleteButton}
+                        onPress={() => handleDeleteServer(item.id, item.name)}
+                      >
+                        <Feather name="trash-2" size={16} color="#F44336" />
+                      </TouchableOpacity>
+                    </View>
                   )}
                 />
                 {onAddServer && (
@@ -105,6 +150,7 @@ const ServerSelector: React.FC<ServerSelectorProps> = ({ onAddServer }) => {
           </View>
         </TouchableOpacity>
       </Modal>
+      <CustomAlert {...alertProps} />
     </View>
   );
 };
@@ -154,6 +200,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#333',
+    flex: 1,
   },
   selectedItem: {
     backgroundColor: '#5752D720',
@@ -191,6 +238,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     marginLeft: 6,
+  },
+  serverItemContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  deleteButton: {
+    padding: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
 

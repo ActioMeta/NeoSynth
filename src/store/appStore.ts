@@ -82,7 +82,7 @@ interface AppState {
   downloadsCache: DownloadsCache | null;
   addServer: (server: Server) => void;
   removeServer: (id: string) => void;
-  setCurrentServer: (server: Server) => void;
+  setCurrentServer: (server: Server | null) => void;
   addPlaylist: (playlist: Playlist) => void;
   removePlaylist: (id: string) => void;
   setPlayerState: (state: Partial<PlayerState>) => void;

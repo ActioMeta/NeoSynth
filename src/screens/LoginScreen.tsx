@@ -7,10 +7,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useCustomAlert } from '../hooks/useCustomAlert';
 import CustomAlert from '../components/CustomAlert';
+import { useAppStore } from '../store/appStore';
 
 
 export default function LoginScreen({ onServerAdded, navigation }: { onServerAdded?: () => void; navigation?: any }) {
   const { showAlert, alertProps } = useCustomAlert();
+  const loadServers = useAppStore(s => s.loadServers);
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [username, setUsername] = useState('');
@@ -31,21 +33,35 @@ export default function LoginScreen({ onServerAdded, navigation }: { onServerAdd
     setLoading(true);
     try {
       // Probar conexión al servidor
-      await pingServer({ url, username, password });
+      console.log('🔗 Intentando conectar al servidor:', url);
+      const pingResult = await pingServer({ url, username, password });
+      console.log('✅ Ping exitoso:', pingResult);
     } catch (e: any) {
+      console.error('❌ Error en ping:', e);
       showAlert('Error de conexión', e?.message || String(e));
       setLoading(false);
       return;
     }
     try {
       await addServerToDB({ name, url, username, password });
+      console.log('✅ Servidor agregado exitosamente');
+      
+      // Recargar la lista de servidores en el store
+      await loadServers();
+      console.log('✅ Lista de servidores actualizada');
+      
       if (onServerAdded) {
         onServerAdded();
       } else if (navigation) {
         navigation.goBack();
       }
     } catch (e: any) {
-      showAlert('Error', e?.message || String(e));
+      console.error('Error al guardar servidor:', e);
+      if (e.message && e.message.includes('Ya existe un servidor')) {
+        showAlert('Servidor duplicado', 'Ya existe un servidor registrado con esta URL. Puedes usar el servidor existente o cambiar la URL.');
+      } else {
+        showAlert('Error', e?.message || String(e));
+      }
     } finally {
       setLoading(false);
     }

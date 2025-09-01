@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { Ionicons, Feather } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import AlbumCard from '../components/AlbumCard';
 import PlaylistCard from '../components/PlaylistCard';
 import ServerSelector from '../components/ServerSelector';
@@ -28,6 +29,14 @@ export default function DiscoverScreen({ navigation }: any) {
   useEffect(() => {
     loadServers();
   }, []);
+  
+  // Recargar servidores cuando la pantalla vuelve a tener foco
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log('🔄 DiscoverScreen focused - reloading servers');
+      loadServers();
+    }, [loadServers])
+  );
   
   useEffect(() => {
     if (!currentServer) return;
