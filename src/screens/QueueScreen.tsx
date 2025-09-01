@@ -14,14 +14,25 @@ import DraggableFlatList, {
   ScaleDecorator,
   RenderItemParams,
 } from 'react-native-draggable-flatlist';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+
 import { useAppStore } from '../store/appStore';
 import { audioPlayer } from '../services/audioPlayer';
+import { getCoverArtUrl } from '../services/subsonic';
+import CustomAlert from '../components/CustomAlert';
+import { useCustomAlert } from '../hooks/useCustomAlert';
 
 export default function QueueScreen() {
   const navigation = useNavigation();
-  const { player } = useAppStore();
+  const { showAlert, alertProps } = useCustomAlert();
+  const { player, currentServer } = useAppStore();
   const { queue, currentTrack, isPlaying } = player;
   const { setPlayerState, removeFromQueue, clearQueue, reorderQueue } = useAppStore();
+
+  const getCoverArtUrlForTrack = (track: any) => {
+    if (!currentServer || !track?.coverArt) return null;
+    return getCoverArtUrl(currentServer, track.coverArt);
+  };
 
   const handlePlayTrack = async (track: any, index: number) => {
     try {
@@ -38,7 +49,7 @@ export default function QueueScreen() {
   };
 
   const handleClearQueue = () => {
-    Alert.alert(
+    showAlert(
       'Limpiar cola',
       '¿Estás seguro de que quieres limpiar toda la cola?',
       [
@@ -61,6 +72,7 @@ export default function QueueScreen() {
 
   const renderTrackItem = ({ item, drag, isActive }: RenderItemParams<any>) => {
     const isCurrentTrack = currentTrack?.id === item.id;
+    const coverArtUrl = getCoverArtUrlForTrack(item);
 
     return (
       <ScaleDecorator>
@@ -76,15 +88,15 @@ export default function QueueScreen() {
             onPress={() => handlePlayTrack(item, 0)}
             disabled={isActive}
           >
-            {item.coverArt ? (
+            {coverArtUrl ? (
               <Image
-                source={{ uri: item.coverArt }}
+                source={{ uri: coverArtUrl }}
                 style={styles.coverArt}
                 resizeMode="cover"
               />
             ) : (
               <View style={[styles.coverArt, styles.coverArtPlaceholder]}>
-                <Feather name="music" size={16} color="#666" />
+                <Feather name="music" size={20} color="#666" />
               </View>
             )}
             
@@ -203,6 +215,8 @@ export default function QueueScreen() {
           />
         )}
       </View>
+      
+      <CustomAlert {...alertProps} />
     </SafeAreaView>
   );
 }
@@ -324,10 +338,15 @@ const styles = StyleSheet.create({
     marginLeft: 0,
   },
   coverArt: {
-    width: 40,
-    height: 40,
-    borderRadius: 4,
+    width: 48,
+    height: 48,
+    borderRadius: 6,
     backgroundColor: '#333',
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
   },
   coverArtPlaceholder: {
     justifyContent: 'center',

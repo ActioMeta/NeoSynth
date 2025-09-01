@@ -11,6 +11,20 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useColorScheme } from '@/components/useColorScheme';
 import { useRemoteControls } from '../src/hooks/useRemoteControls';
 import { audioPlayer } from '../src/services/audioPlayer';
+import { useAppStore } from '../src/store/appStore';
+
+// Suprimir warnings de expo-av globalmente
+const originalWarn = console.warn;
+console.warn = (...args) => {
+  if (args[0] && typeof args[0] === 'string' && 
+      (args[0].includes('expo-av') || args[0].includes('Expo AV has been deprecated'))) {
+    return; // Suprimir warnings de expo-av
+  }
+  originalWarn.apply(console, args);
+};
+
+// Debug: Log the imported audioPlayer
+console.log('Imported audioPlayer:', audioPlayer);
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -51,19 +65,42 @@ export default function RootLayout() {
 
 function RootLayoutNav() {
   const colorScheme = useColorScheme();
+  const loadServers = useAppStore((state) => state.loadServers);
   
   // Configurar controles remotos para audífonos
   useRemoteControls();
   
-  // Inicializar el reproductor de audio
+  // Inicializar el reproductor de audio y cargar servidores
   useEffect(() => {
-    audioPlayer.initialize();
+    const initializeApp = async () => {
+      try {
+        // Cargar servidores desde la base de datos
+        console.log('Loading servers from database...');
+        await loadServers();
+        console.log('Servers loaded successfully');
+        
+        // Inicializar audio player
+        console.log('Initializing audio player...', audioPlayer);
+        if (audioPlayer && typeof audioPlayer.initialize === 'function') {
+          await audioPlayer.initialize();
+          console.log('Audio player initialized successfully');
+        } else {
+          console.error('Audio player is undefined or missing initialize method:', audioPlayer);
+        }
+      } catch (error) {
+        console.error('Error initializing app:', error);
+      }
+    };
+    
+    initializeApp();
     
     return () => {
       // Cleanup al desmontar
-      audioPlayer.destroy();
+      if (audioPlayer && typeof audioPlayer.destroy === 'function') {
+        audioPlayer.destroy();
+      }
     };
-  }, []);
+  }, [loadServers]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

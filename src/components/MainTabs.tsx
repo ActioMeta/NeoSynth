@@ -65,10 +65,11 @@ function MainTabs() {
       initialRouteName="Discover"
       screenOptions={({ route }) => ({
         tabBarIcon: ({ color, size, focused }) => {
-          let iconName = 'music';
-          if (route.name === 'Discover') iconName = 'compass';
-          if (route.name === 'Downloads') iconName = 'download';
-          if (route.name === 'Library') iconName = 'folder';
+          let iconName: string = 'music';
+          const routeName = route?.name || '';
+          if (routeName === 'Discover') iconName = 'compass';
+          if (routeName === 'Downloads') iconName = 'download';
+          if (routeName === 'Library') iconName = 'folder';
           return <Feather name={iconName as any} size={24} color={focused ? '#5752D7' : '#B3B3B3'} style={{ marginBottom: -2 }} />;
         },
         tabBarActiveTintColor: '#5752D7',

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal, FlatList } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Feather } from '@expo/vector-icons';
 import { useAppStore } from '../store/appStore';
 
 type ServerSelectorProps = {
@@ -34,7 +34,7 @@ const ServerSelector: React.FC<ServerSelectorProps> = ({ onAddServer }) => {
         <Text style={styles.serverText} numberOfLines={1}>
           {displayText}
         </Text>
-        <Ionicons name="chevron-down" size={16} color="#5752D7" />
+        <Feather name="chevron-down" size={16} color="#5752D7" />
       </TouchableOpacity>
 
       <Modal
@@ -60,7 +60,7 @@ const ServerSelector: React.FC<ServerSelectorProps> = ({ onAddServer }) => {
                       onAddServer();
                     }}
                   >
-                    <Ionicons name="add" size={16} color="#fff" />
+                    <Feather name="plus" size={16} color="#fff" />
                     <Text style={styles.addButtonText}>Agregar servidor</Text>
                   </TouchableOpacity>
                 )}
@@ -83,7 +83,7 @@ const ServerSelector: React.FC<ServerSelectorProps> = ({ onAddServer }) => {
                         <Text style={styles.serverUrl}>{item.url}</Text>
                       </View>
                       {currentServer?.id === item.id && (
-                        <Ionicons name="checkmark" size={20} color="#5752D7" />
+                        <Feather name="check" size={20} color="#5752D7" />
                       )}
                     </TouchableOpacity>
                   )}
@@ -96,7 +96,7 @@ const ServerSelector: React.FC<ServerSelectorProps> = ({ onAddServer }) => {
                       onAddServer();
                     }}
                   >
-                    <Ionicons name="add" size={16} color="#fff" />
+                    <Feather name="plus" size={16} color="#fff" />
                     <Text style={styles.addButtonText}>Agregar servidor</Text>
                   </TouchableOpacity>
                 )}

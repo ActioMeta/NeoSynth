@@ -65,6 +65,113 @@ export async function getGenres(auth: SubsonicAuth) {
   return subsonicRequest(auth, 'getGenres.view');
 }
 
+export async function getYears(auth: SubsonicAuth) {
+  // Subsonic no tiene un endpoint específico para años, 
+  // obtenemos los álbumes más recientes y extraemos los años únicos
+  const response = await subsonicRequest(auth, 'getAlbumList2.view', {
+    type: 'newest',
+    size: '500' // Obtener muchos albums para tener buena variedad de años
+  });
+  
+  // Extraer años únicos de los álbumes
+  const albums = response?.['subsonic-response']?.albumList2?.album || [];
+  const years = new Set<number>();
+  
+  albums.forEach((album: any) => {
+    if (album.year && album.year > 0) {
+      years.add(album.year);
+    }
+  });
+  
+  // Convertir a array y ordenar descendente
+  return Array.from(years)
+    .sort((a, b) => b - a)
+    .slice(0, 20) // Limitar a 20 años
+    .map(year => ({ year, name: year.toString() }));
+}
+
+export async function getAlbumsByGenre(auth: SubsonicAuth, genre: string) {
+  // Buscar álbumes por género usando getAlbumList2 con tipo 'alphabeticalByName'
+  // y luego filtrar por género en el cliente (Subsonic no siempre soporta 'byGenre')
+  try {
+    const response = await subsonicRequest(auth, 'getAlbumList2.view', {
+      type: 'alphabeticalByName',
+      size: '500' // Obtener muchos álbumes para filtrar
+    });
+    
+    const albums = response?.['subsonic-response']?.albumList2?.album || [];
+    // Filtrar álbumes por género
+    const filtered = albums.filter((album: any) => 
+      album.genre && album.genre.toLowerCase().includes(genre.toLowerCase())
+    );
+    
+    return {
+      'subsonic-response': {
+        albumList2: {
+          album: filtered.slice(0, 100) // Limitar resultados
+        }
+      }
+    };
+  } catch (error) {
+    console.error('Error getting albums by genre:', error);
+    return { 'subsonic-response': { albumList2: { album: [] } } };
+  }
+}
+
+export async function getAlbumsByYear(auth: SubsonicAuth, year: string) {
+  // Buscar álbumes por año usando getAlbumList2 con tipo 'alphabeticalByName'
+  // y luego filtrar por año en el cliente
+  try {
+    const response = await subsonicRequest(auth, 'getAlbumList2.view', {
+      type: 'alphabeticalByName',
+      size: '500' // Obtener muchos álbumes para filtrar
+    });
+    
+    const albums = response?.['subsonic-response']?.albumList2?.album || [];
+    // Filtrar álbumes por año
+    const filtered = albums.filter((album: any) => 
+      album.year && album.year.toString() === year
+    );
+    
+    return {
+      'subsonic-response': {
+        albumList2: {
+          album: filtered.slice(0, 100) // Limitar resultados
+        }
+      }
+    };
+  } catch (error) {
+    console.error('Error getting albums by year:', error);
+    return { 'subsonic-response': { albumList2: { album: [] } } };
+  }
+}
+
+export async function getSongsByGenre(auth: SubsonicAuth, genre: string) {
+  // Buscar canciones por género usando getRandomSongs con filtro de género
+  try {
+    const response = await subsonicRequest(auth, 'getRandomSongs.view', {
+      size: '100'
+    });
+    
+    const songs = response?.['subsonic-response']?.randomSongs?.song || [];
+    // Filtrar canciones por género en el cliente
+    const filtered = songs.filter((song: any) => 
+      song.genre && song.genre.toLowerCase().includes(genre.toLowerCase())
+    );
+    
+    return {
+      'subsonic-response': {
+        randomSongs: {
+          song: filtered.slice(0, 50) // Limitar resultados
+        }
+      }
+    };
+  } catch (error) {
+    console.error('Error getting songs by genre:', error);
+    return { 'subsonic-response': { randomSongs: { song: [] } } };
+  }
+}
+
 export async function getAlbum(auth: SubsonicAuth, albumId: string) {
   return subsonicRequest(auth, 'getAlbum.view', { id: albumId });
 }
@@ -81,23 +188,57 @@ export async function getMusicDirectory(auth: SubsonicAuth, id: string) {
   return subsonicRequest(auth, 'getMusicDirectory.view', { id });
 }
 
-export async function streamUrl(auth: SubsonicAuth, id: string) {
+export function streamUrl(auth: SubsonicAuth, id: string) {
   // Devuelve la URL directa para streaming
   return `${auth.url}/rest/stream.view?u=${auth.username}&p=${auth.password}&v=1.16.1&c=neosynth&f=json&id=${id}`;
 }
 
-export function getCoverArtUrl(auth: SubsonicAuth, coverArtId: string): string {
+export function getCoverArtUrl(server: SubsonicAuth, id: string): string {
   const params = new URLSearchParams({
-    u: auth.username,
-    p: auth.password,
+    u: server.username,
+    p: server.password,
     v: '1.16.1',
     c: 'neosynth',
     f: 'json',
-    id: coverArtId,
+    id: id,
     size: '300'
   });
   
-  return `${auth.url}/rest/getCoverArt?${params.toString()}`;
+  return `${server.url}/rest/getCoverArt.view?${params.toString()}`;
+}
+
+export async function searchMusic(server: SubsonicAuth, query: string) {
+  console.log('🔍 Making search request for:', query);
+  
+  try {
+    const response = await subsonicRequest(server, 'search3.view', {
+      query: query,
+      songCount: '20',
+      albumCount: '20', 
+      artistCount: '20'
+    });
+    
+    console.log('🔍 Raw search response:', JSON.stringify(response, null, 2));
+    
+    // Verificar la estructura de la respuesta
+    if (response && response['subsonic-response']) {
+      const subsonicResponse = response['subsonic-response'];
+      console.log('🔍 Subsonic response status:', subsonicResponse.status);
+      
+      if (subsonicResponse.status === 'ok' && subsonicResponse.searchResult3) {
+        return subsonicResponse.searchResult3;
+      } else {
+        console.log('🔍 Search failed or no results:', subsonicResponse);
+        return { song: [], album: [], artist: [] };
+      }
+    } else {
+      console.log('🔍 Invalid response structure:', response);
+      return { song: [], album: [], artist: [] };
+    }
+  } catch (error) {
+    console.error('🔍 Search error:', error);
+    throw error;
+  }
 }
 
 export function getArtistImageUrl(auth: SubsonicAuth, artistId: string): string {

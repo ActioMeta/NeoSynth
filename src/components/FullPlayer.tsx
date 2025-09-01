@@ -7,7 +7,9 @@ import {
   Modal, 
   SafeAreaView, 
   Image,
-  Dimensions 
+  Dimensions,
+  Animated,
+  StatusBar
 } from 'react-native';
 import { Ionicons, Feather } from '@expo/vector-icons';
 import Slider from '@react-native-community/slider';
@@ -26,6 +28,7 @@ export default function FullPlayer({ visible, onClose }: FullPlayerProps) {
   const currentTrack = useAppStore(s => s.player.currentTrack);
   const isPlaying = useAppStore(s => s.player.isPlaying);
   const queue = useAppStore(s => s.player.queue);
+  const currentIndex = useAppStore(s => s.player.currentIndex);
   const shuffle = useAppStore(s => s.player.shuffle);
   const repeat = useAppStore(s => s.player.repeat);
   const currentServer = useAppStore(s => s.currentServer);
@@ -39,11 +42,57 @@ export default function FullPlayer({ visible, onClose }: FullPlayerProps) {
   const [duration, setDuration] = useState(0);
   const [isSeeking, setIsSeeking] = useState(false);
   const [coverArtUrl, setCoverArtUrl] = useState<string | null>(null);
+  
+  // Animation values
+  const slideAnim = useState(new Animated.Value(Dimensions.get('window').height))[0];
+  const fadeAnim = useState(new Animated.Value(0))[0];
+
+  // Handle modal visibility changes with smooth animations
+  useEffect(() => {
+    if (visible) {
+      // Show modal
+      Animated.parallel([
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: 350,
+          useNativeDriver: true,
+        }),
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 250,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    } else {
+      // Hide modal
+      Animated.parallel([
+        Animated.timing(slideAnim, {
+          toValue: Dimensions.get('window').height,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.timing(fadeAnim, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+  }, [visible]);
 
   useEffect(() => {
     // Load cover art URL when track changes
     if (currentTrack && currentServer) {
-      const coverUrl = getCoverArtUrl(currentServer, currentTrack.coverArt || currentTrack.albumId || currentTrack.id);
+      let coverUrl: string;
+      
+      // Si coverArt ya es una URL completa, usarla directamente
+      if (currentTrack.coverArt && currentTrack.coverArt.startsWith('http')) {
+        coverUrl = currentTrack.coverArt;
+      } else {
+        // Si es solo un ID, construir la URL completa
+        coverUrl = getCoverArtUrl(currentServer, currentTrack.coverArt || currentTrack.albumId || currentTrack.id);
+      }
+      
       setCoverArtUrl(coverUrl);
     } else {
       setCoverArtUrl(null);
@@ -51,23 +100,13 @@ export default function FullPlayer({ visible, onClose }: FullPlayerProps) {
   }, [currentTrack, currentServer]);
 
   useEffect(() => {
-    // Update position periodically when playing
-    let interval: any;
-    
-    if (isPlaying && !isSeeking) {
-      interval = setInterval(async () => {
-        const status = await audioPlayer.getStatus();
-        if (status?.isLoaded) {
-          setPosition(status.positionMillis || 0);
-          setDuration(status.durationMillis || 0);
-        }
-      }, 1000);
+    // Update position from store instead of polling
+    const store = useAppStore.getState();
+    if (!isSeeking) {
+      setPosition(store.player.position || 0);
+      setDuration(store.player.duration || 0);
     }
-    
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [isPlaying, isSeeking]);
+  }, [useAppStore(s => s.player.position), useAppStore(s => s.player.duration), isSeeking]);
 
   const handlePlayPause = async () => {
     if (!currentTrack) return;
@@ -80,22 +119,11 @@ export default function FullPlayer({ visible, onClose }: FullPlayerProps) {
   };
 
   const handleNext = async () => {
-    if (queue.length > 0) {
-      const nextTrack = queue[0];
-      removeFromQueue(nextTrack.id);
-      setPlayerState({ currentTrack: nextTrack });
-      await audioPlayer.playTrack(nextTrack);
-    }
+    await audioPlayer.playNext();
   };
 
   const handlePrevious = async () => {
-    // If more than 3 seconds have passed, restart current track
-    if (position > 3000) {
-      await audioPlayer.seek(0);
-    } else {
-      // Go to previous track in queue
-      await audioPlayer.playPrevious();
-    }
+    await audioPlayer.playPrevious();
   };
 
   const handleSeekStart = () => {
@@ -136,20 +164,37 @@ export default function FullPlayer({ visible, onClose }: FullPlayerProps) {
   return (
     <Modal
       visible={visible}
-      animationType="slide"
+      animationType="none"
+      presentationStyle="fullScreen"
       statusBarTranslucent
       onRequestClose={onClose}
     >
-      <View style={[styles.container, { paddingTop: insets.top }]}>
+      <Animated.View 
+        style={[
+          styles.modalContainer,
+          {
+            opacity: fadeAnim,
+            transform: [{ translateY: slideAnim }]
+          }
+        ]}
+      >
+        <StatusBar barStyle="light-content" backgroundColor="#000" />
+        <View style={[styles.container, { paddingTop: insets.top }]}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={onClose}>
+          <TouchableOpacity onPress={onClose} style={styles.headerButton}>
             <Feather name="chevron-down" size={24} color="#fff" />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => {
-            onClose();
-            (navigation as any).navigate('Queue');
-          }}>
+          
+          <Text style={styles.headerTitle}>Reproduciendo</Text>
+          
+          <TouchableOpacity 
+            onPress={() => {
+              onClose();
+              (navigation as any).navigate('Queue');
+            }}
+            style={styles.headerButton}
+          >
             <Feather name="list" size={24} color="#fff" />
           </TouchableOpacity>
         </View>
@@ -172,13 +217,13 @@ export default function FullPlayer({ visible, onClose }: FullPlayerProps) {
         {/* Track Info */}
         <View style={styles.trackInfo}>
           <Text style={styles.trackTitle} numberOfLines={2}>
-            {currentTrack.title}
+            {currentTrack.title || 'Sin título'}
           </Text>
           <Text style={styles.trackArtist} numberOfLines={1}>
-            {currentTrack.artist}
+            {currentTrack.artist || 'Artista desconocido'}
           </Text>
           <Text style={styles.trackAlbum} numberOfLines={1}>
-            {currentTrack.album}
+            {currentTrack.album || 'Álbum desconocido'}
           </Text>
         </View>
 
@@ -237,19 +282,24 @@ export default function FullPlayer({ visible, onClose }: FullPlayerProps) {
         </View>
 
         {/* Queue info */}
-        {queue.length > 0 && (
+        {queue.length > 0 && currentIndex !== undefined && currentIndex + 1 < queue.length && (
           <View style={styles.queueInfo}>
             <Text style={styles.queueText}>
-              Siguientes: {queue.length} canciones
+              A continuación: {queue[currentIndex + 1]?.title || 'Canción desconocida'}
             </Text>
           </View>
         )}
-      </View>
+        </View>
+      </Animated.View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
   container: {
     flex: 1,
     backgroundColor: '#000',
@@ -260,11 +310,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 16,
+    minHeight: 60, // Altura mínima para consistencia
   },
   headerTitle: {
     fontSize: 16,
     fontWeight: 'bold',
     color: '#fff',
+    textAlign: 'center',
+  },
+  headerButton: {
+    padding: 8,
+    minWidth: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   albumArtContainer: {
     justifyContent: 'center',
@@ -331,9 +389,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 32,
     marginBottom: 16,
+    gap: 16, // Espacio uniforme entre controles
   },
   controlButton: {
-    padding: 16,
+    padding: 12,
+    minWidth: 56,
+    minHeight: 56,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   playButton: {
     backgroundColor: '#5752D7',
@@ -342,7 +405,7 @@ const styles = StyleSheet.create({
     height: 70,
     justifyContent: 'center',
     alignItems: 'center',
-    marginHorizontal: 24,
+    marginHorizontal: 8,
   },
   queueInfo: {
     alignItems: 'center',

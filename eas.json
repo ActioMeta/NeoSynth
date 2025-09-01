@@ -1,0 +1,32 @@
+{
+  "cli": {
+    "version": ">= 12.8.1",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "android": {
+        "buildType": "apk"
+      },
+      "distribution": "internal"
+    },
+    "production": {
+      "android": {
+        "buildType": "app-bundle"
+      }
+    },
+    "production-apk": {
+      "android": {
+        "buildType": "apk"
+      },
+      "distribution": "store"
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

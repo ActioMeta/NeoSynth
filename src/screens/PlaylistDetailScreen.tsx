@@ -1,9 +1,11 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Ionicons, Feather } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import TrackCard from '../components/TrackCard';
 import ItemMenu from '../components/ItemMenu';
+import { useCustomAlert } from '../hooks/useCustomAlert';
+import CustomAlert from '../components/CustomAlert';
 import { useAppStore } from '../store/appStore';
 import { getPlaylistPaginated, streamUrl, getCoverArtUrl } from '../services/subsonic';
 import { audioPlayer } from '../services/audioPlayer';
@@ -18,6 +20,7 @@ export default function PlaylistDetailScreen({ route, navigation }: any) {
   const currentServer = useAppStore(s => s.currentServer);
   const addToQueue = useAppStore(s => s.addToQueue);
   const setPlayerState = useAppStore(s => s.setPlayerState);
+  const { showAlert, alertProps } = useCustomAlert();
   const insets = useSafeAreaInsets();
   const [tracks, setTracks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -228,13 +231,13 @@ export default function PlaylistDetailScreen({ route, navigation }: any) {
       );
       
       console.log('Playlist descargada exitosamente');
-      Alert.alert(
+      showAlert(
         'Descarga completada',
         `La playlist "${playlist.name}" se ha descargado para uso offline.`
       );
     } catch (error) {
       console.error('Error descargando playlist:', error);
-      Alert.alert(
+      showAlert(
         'Error',
         'No se pudo descargar la playlist. Inténtalo de nuevo.'
       );
@@ -405,6 +408,7 @@ export default function PlaylistDetailScreen({ route, navigation }: any) {
           }
         ]}
       />
+      <CustomAlert {...alertProps} />
     </SafeAreaView>
   );
 }

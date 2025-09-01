@@ -65,10 +65,10 @@ export default function PlayerBar() {
         
         <View style={styles.textInfo}>
           <Text style={styles.title} numberOfLines={1}>
-            {currentTrack.title}
+            {currentTrack.title || 'Sin título'}
           </Text>
           <Text style={styles.artist} numberOfLines={1}>
-            {currentTrack.artist}
+            {currentTrack.artist || 'Artista desconocido'}
           </Text>
         </View>
       </View>

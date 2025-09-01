@@ -77,12 +77,15 @@ export default function DiscoverScreen({ navigation }: any) {
       ]);
       
       console.log('Discover data loaded:', { recent: recent?.length, frequent: frequent?.length, newest: newest?.length, random: random?.length, playlists: playlists?.length });
+      console.log('Playlists sample:', playlists.slice(0, 3).map((p: any) => ({ id: p.id, name: p.name })));
       
       const recentData = recent.length > 0 ? recent : fallbackAlbums;
       const frequentData = frequent.length > 0 ? frequent : fallbackAlbums;
       const newestData = newest.length > 0 ? newest : fallbackAlbums;
       const randomData = random.length > 0 ? random : fallbackAlbums;
       const playlistsData = playlists.length > 0 ? playlists : fallbackPlaylists;
+      
+      console.log('Final playlists data:', playlistsData.length, playlistsData.map((p: any) => ({ id: p.id, name: p.name })));
       
       setRecentAlbums(recentData);
       setFrequentAlbums(frequentData);
@@ -131,7 +134,7 @@ export default function DiscoverScreen({ navigation }: any) {
           duration: track.duration * 1000, // Convertir a millisegundos
           url: streamUrl(currentServer!, track.id),
           isOffline: false,
-          coverArt: track.coverArt,
+          coverArt: track.coverArt ? getCoverArtUrl(currentServer!, track.coverArt) : undefined,
           albumId: album.id
         }));
         
@@ -214,7 +217,7 @@ export default function DiscoverScreen({ navigation }: any) {
           duration: track.duration * 1000, // Convertir a millisegundos
           url: streamUrl(currentServer!, track.id),
           isOffline: false,
-          coverArt: track.coverArt,
+          coverArt: track.coverArt ? getCoverArtUrl(currentServer!, track.coverArt) : undefined,
           albumId: track.albumId
         }));
         
@@ -314,7 +317,7 @@ export default function DiscoverScreen({ navigation }: any) {
           </TouchableOpacity>
           <TouchableOpacity 
             style={styles.searchButton}
-            onPress={() => navigation.navigate('Search')}
+            onPress={() => navigation.navigate('Search', { scope: 'discover' })}
           >
             <Feather name="search" size={24} color="#5752D7" />
           </TouchableOpacity>
@@ -400,17 +403,20 @@ export default function DiscoverScreen({ navigation }: any) {
               showsHorizontalScrollIndicator={false}
               style={{ marginTop: 8 }}
             >
-              {playlists.map((item) => (
-                <PlaylistCard
-                  key={item.id}
-                  name={item.name}
-                  trackCount={item.songCount || 0}
-                  onPlay={() => handlePlayPlaylist(item)}
-                  onAddToQueue={() => handleAddPlaylistToQueue(item)}
-                  onAddToPlaylist={() => handleAddPlaylistToPlaylist(item)}
-                  onPress={() => navigation.navigate('PlaylistDetail', { playlist: item })}
-                />
-              ))}
+              {playlists.map((item) => {
+                console.log('Rendering playlist:', item.id, item.name);
+                return (
+                  <PlaylistCard
+                    key={item.id}
+                    name={item.name}
+                    trackCount={item.songCount || 0}
+                    onPlay={() => handlePlayPlaylist(item)}
+                    onAddToQueue={() => handleAddPlaylistToQueue(item)}
+                    onAddToPlaylist={() => handleAddPlaylistToPlaylist(item)}
+                    onPress={() => navigation.navigate('PlaylistDetail', { playlist: item })}
+                  />
+                );
+              })}
             </ScrollView>
           )}
         </ScrollView>

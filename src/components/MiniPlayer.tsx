@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, Animated, Image } from 'react
 import { Ionicons } from '@expo/vector-icons';
 import { useAppStore } from '../store/appStore';
 import { audioPlayer } from '../services/audioPlayer';
+import { getCoverArtUrl } from '../services/subsonic';
 import FullPlayer from './FullPlayer';
 
 export default function MiniPlayer() {
@@ -11,11 +12,25 @@ export default function MiniPlayer() {
   const setPlayerState = useAppStore(s => s.setPlayerState);
   const queue = useAppStore(s => s.player.queue);
   const removeFromQueue = useAppStore(s => s.removeFromQueue);
+  const currentServer = useAppStore(s => s.currentServer);
   
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
   const [showFullPlayer, setShowFullPlayer] = useState(false);
   const translateY = useRef(new Animated.Value(0)).current;
+
+  // Función para construir la URL del cover art
+  const getCoverArtUrlForTrack = (track: any) => {
+    if (!track?.coverArt || !currentServer) return null;
+    
+    // Si ya es una URL completa, devolverla
+    if (track.coverArt.startsWith('http')) {
+      return track.coverArt;
+    }
+    
+    // Si es solo un ID, construir la URL completa
+    return getCoverArtUrl(currentServer, track.coverArt);
+  };
 
   useEffect(() => {
     // Initialize audio player
@@ -23,23 +38,11 @@ export default function MiniPlayer() {
   }, []);
 
   useEffect(() => {
-    // Update position periodically when playing
-    let interval: any;
-    
-    if (isPlaying) {
-      interval = setInterval(async () => {
-        const status = await audioPlayer.getStatus();
-        if (status?.isLoaded) {
-          setPosition(status.positionMillis || 0);
-          setDuration(status.durationMillis || 0);
-        }
-      }, 1000);
-    }
-    
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [isPlaying]);
+    // Update position from store instead of polling
+    const store = useAppStore.getState();
+    setPosition(store.player.position || 0);
+    setDuration(store.player.duration || 0);
+  }, [useAppStore(s => s.player.position), useAppStore(s => s.player.duration)]);
 
   const handlePlayPause = async () => {
     if (!currentTrack) return;
@@ -74,11 +77,15 @@ export default function MiniPlayer() {
   // Don't show if no track
   if (!currentTrack) return <></>;
 
+  // Obtener URL del cover art
+  const coverArtUrl = getCoverArtUrlForTrack(currentTrack);
+
   // Debug cover art
   console.log('MiniPlayer - currentTrack:', {
     title: currentTrack.title,
     coverArt: currentTrack.coverArt,
-    hasValidCoverArt: !!currentTrack.coverArt && currentTrack.coverArt.length > 0
+    coverArtUrl: coverArtUrl,
+    hasValidCoverArt: !!coverArtUrl
   });
 
   return (
@@ -100,9 +107,9 @@ export default function MiniPlayer() {
           {/* Track info */}
           <View style={styles.trackInfo}>
             <View style={styles.albumArt}>
-              {currentTrack.coverArt ? (
+              {coverArtUrl ? (
                 <Image
-                  source={{ uri: currentTrack.coverArt }}
+                  source={{ uri: coverArtUrl }}
                   style={styles.coverArtImage}
                   resizeMode="cover"
                 />
@@ -112,10 +119,10 @@ export default function MiniPlayer() {
             </View>
             <View style={styles.textInfo}>
               <Text style={styles.trackTitle} numberOfLines={1}>
-                {currentTrack.title}
+                {currentTrack.title || 'Sin título'}
               </Text>
               <Text style={styles.trackArtist} numberOfLines={1}>
-                {currentTrack.artist}
+                {currentTrack.artist || 'Artista desconocido'}
               </Text>
             </View>
             

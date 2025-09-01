@@ -1,7 +1,12 @@
 import * as FileSystem from 'expo-file-system';
 import { Track, Server } from '../store/appStore';
 import { streamUrl } from './subsonic';
-import { addOfflineTrack, updateTrackLocalPath } from '../database/offlineTracks';
+import { 
+  addOfflineTrack, 
+  updateTrackLocalPath, 
+  getOfflineTrackFilePath, 
+  removeOfflineTrack 
+} from '../database/offlineTracks';
 
 export interface DownloadProgress {
   trackId: string;
@@ -15,12 +20,17 @@ export class DownloadService {
   private activeDownloads: Map<string, FileSystem.DownloadResumable> = new Map();
   private progressCallbacks: Map<string, (progress: DownloadProgress) => void> = new Map();
   private static instance: DownloadService;
+  private onDownloadComplete?: () => void;
 
   static getInstance(): DownloadService {
     if (!DownloadService.instance) {
       DownloadService.instance = new DownloadService();
     }
     return DownloadService.instance;
+  }
+
+  setOnDownloadComplete(callback: () => void) {
+    this.onDownloadComplete = callback;
   }
 
   async initializeOfflineDirectory() {
@@ -42,13 +52,37 @@ export class DownloadService {
     
     await this.initializeOfflineDirectory();
     
-    // Verificar si ya está descargado
-    const localPath = this.getLocalPath(track.id);
-    const fileExists = await this.checkFileExists(localPath);
+    // Verificar si ya está descargado - primero en la BD, luego en el path construido
+    let localPath: string;
+    let fileExists = false;
     
-    if (fileExists) {
-      console.log('Track ya descargado:', localPath);
-      return localPath;
+    try {
+      // Verificar en BD
+      const dbPath = await getOfflineTrackFilePath(track.id);
+      
+      if (dbPath) {
+        // Si existe en BD, verificar que el archivo realmente existe
+        fileExists = await this.checkFileExists(dbPath);
+        if (fileExists) {
+          console.log('Track ya descargado (BD):', dbPath);
+          return dbPath;
+        } else {
+          console.log('Track en BD pero archivo no existe, eliminando entrada...');
+          await removeOfflineTrack(track.id);
+        }
+      }
+      
+      // Si no está en BD o el archivo no existe, usar ruta construida
+      localPath = this.getLocalPath(track.id);
+      fileExists = await this.checkFileExists(localPath);
+      
+      if (fileExists) {
+        console.log('Track ya descargado (path):', localPath);
+        return localPath;
+      }
+    } catch (error) {
+      console.warn('Error verificando track offline:', error);
+      localPath = this.getLocalPath(track.id);
     }
 
     // Generar URL de streaming
@@ -111,12 +145,19 @@ export class DownloadService {
       
       try {
         await addOfflineTrack(offlineTrack, result.uri);
+        
       } catch (dbError) {
         console.warn('Error guardando track en BD:', dbError);
         // Continuar aunque falle la BD
       }
 
       console.log('Track descargado exitosamente:', result.uri);
+      
+      // Notificar que se completó la descarga
+      if (this.onDownloadComplete) {
+        this.onDownloadComplete();
+      }
+      
       return result.uri;
       
     } catch (error) {
@@ -150,6 +191,7 @@ export class DownloadService {
 
     for (const track of tracks) {
       try {
+        console.log(`📀 Downloading album track: ${track.title}`);
         const localPath = await this.downloadTrack(track, server, (progress) => {
           if (onProgress) {
             onProgress(completedCount / tracks.length, progress);
@@ -161,6 +203,15 @@ export class DownloadService {
           isOffline: true,
           localPath,
         };
+
+        // ✅ ESTO ESTABA FALTANDO: Guardar en la base de datos
+        try {
+          await addOfflineTrack(offlineTrack, localPath);
+          console.log(`✅ Album track saved to DB: ${track.title}`);
+        } catch (dbError) {
+          console.warn(`⚠️ Error saving album track to DB: ${track.title}`, dbError);
+          // Continuar aunque falle la BD
+        }
 
         downloadedTracks.push(offlineTrack);
         completedCount++;
@@ -179,6 +230,11 @@ export class DownloadService {
       }
     }
 
+    // Notificar que se completó la descarga del álbum
+    if (this.onDownloadComplete) {
+      this.onDownloadComplete();
+    }
+
     return downloadedTracks;
   }
 
@@ -193,6 +249,7 @@ export class DownloadService {
 
     for (const track of tracks) {
       try {
+        console.log(`🎵 Downloading playlist track: ${track.title}`);
         const localPath = await this.downloadTrack(track, server, (progress) => {
           if (onProgress) {
             onProgress(completedCount / tracks.length, progress);
@@ -204,6 +261,15 @@ export class DownloadService {
           isOffline: true,
           localPath,
         };
+
+        // ✅ ESTO ESTABA FALTANDO: Guardar en la base de datos
+        try {
+          await addOfflineTrack(offlineTrack, localPath);
+          console.log(`✅ Playlist track saved to DB: ${track.title}`);
+        } catch (dbError) {
+          console.warn(`⚠️ Error saving playlist track to DB: ${track.title}`, dbError);
+          // Continuar aunque falle la BD
+        }
 
         downloadedTracks.push(offlineTrack);
         completedCount++;
@@ -220,6 +286,11 @@ export class DownloadService {
         console.error(`Error descargando track ${track.title}:`, error);
         // Continuar con el siguiente track
       }
+    }
+
+    // Notificar que se completó la descarga de la playlist
+    if (this.onDownloadComplete) {
+      this.onDownloadComplete();
     }
 
     return downloadedTracks;
@@ -266,12 +337,27 @@ export class DownloadService {
   }
 
   async deleteOfflineTrack(trackId: string): Promise<void> {
-    const localPath = this.getLocalPath(trackId);
     try {
-      await FileSystem.deleteAsync(localPath, { idempotent: true });
-      console.log('Track offline eliminado:', localPath);
+      // Primero obtener el path del archivo desde la BD
+      const localPath = await getOfflineTrackFilePath(trackId);
+      
+      // Eliminar el archivo físico si existe
+      if (localPath) {
+        try {
+          await FileSystem.deleteAsync(localPath, { idempotent: true });
+          console.log('✅ Archivo físico eliminado:', localPath);
+        } catch (fileError) {
+          console.warn('⚠️ No se pudo eliminar el archivo físico:', fileError);
+          // Continuar para eliminar el registro de la BD aunque falle el archivo
+        }
+      }
+      
+      // Eliminar el registro de la base de datos
+      await removeOfflineTrack(trackId);
+      console.log('✅ Registro de BD eliminado para track:', trackId);
+      
     } catch (error) {
-      console.error('Error eliminando track offline:', error);
+      console.error('❌ Error eliminando track offline:', error);
       throw error;
     }
   }

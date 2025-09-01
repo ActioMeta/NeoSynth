@@ -1,10 +1,12 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
 import { Ionicons, Feather } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import TrackCard from '../components/TrackCard';
 import ItemMenu from '../components/ItemMenu';
 import DownloadButton from '../components/DownloadButton';
+import { useCustomAlert } from '../hooks/useCustomAlert';
+import CustomAlert from '../components/CustomAlert';
 import { useAppStore } from '../store/appStore';
 import { getMusicDirectory, streamUrl, subsonicRequest, getCoverArtUrl } from '../services/subsonic';
 import { audioPlayer } from '../services/audioPlayer';
@@ -16,6 +18,7 @@ export default function AlbumDetailScreen({ route, navigation }: any) {
   const currentServer = useAppStore(s => s.currentServer);
   const addToQueue = useAppStore(s => s.addToQueue);
   const setPlayerState = useAppStore(s => s.setPlayerState);
+  const { showAlert, alertProps } = useCustomAlert();
   const insets = useSafeAreaInsets();
   const [tracks, setTracks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -173,7 +176,7 @@ export default function AlbumDetailScreen({ route, navigation }: any) {
   const handleDownloadAlbum = async () => {
     if (!currentServer || tracks.length === 0) return;
     
-    Alert.alert(
+    showAlert(
       'Descargar Álbum',
       `¿Deseas descargar "${albumInfo.name}" completo para reproducción offline? (${tracks.length} canciones)`,
       [
@@ -212,10 +215,10 @@ export default function AlbumDetailScreen({ route, navigation }: any) {
                 }
               );
 
-              Alert.alert('Descarga Completa', `El álbum "${albumInfo.name}" se ha descargado correctamente.`);
+              showAlert('Descarga Completa', `El álbum "${albumInfo.name}" se ha descargado correctamente.`);
             } catch (error) {
               console.error('Error downloading album:', error);
-              Alert.alert('Error', 'No se pudo descargar el álbum completo');
+              showAlert('Error', 'No se pudo descargar el álbum completo');
             }
           },
         },
@@ -371,6 +374,8 @@ export default function AlbumDetailScreen({ route, navigation }: any) {
           }
         ]}
       />
+
+      <CustomAlert {...alertProps} />
     </SafeAreaView>
   );
 }

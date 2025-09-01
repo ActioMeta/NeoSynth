@@ -40,6 +40,12 @@ export interface PlayerState {
   repeat: boolean;
 }
 
+interface AudioSettings {
+  crossfadeEnabled: boolean;
+  crossfadeDuration: number; // en millisegundos
+  prebufferTime: number; // en millisegundos
+}
+
 interface DiscoverCache {
   recentAlbums: any[];
   frequentAlbums: any[];
@@ -53,6 +59,7 @@ interface DiscoverCache {
 interface LibraryCache {
   artists: any[];
   genres: any[];
+  years: any[];
   playlists: any[];
   lastUpdated: number;
   serverId: string;
@@ -69,6 +76,7 @@ interface AppState {
   currentServer: Server | null;
   playlists: Playlist[];
   player: PlayerState;
+  audioSettings: AudioSettings;
   discoverCache: DiscoverCache | null;
   libraryCache: LibraryCache | null;
   downloadsCache: DownloadsCache | null;
@@ -90,6 +98,7 @@ interface AppState {
   setDownloadsCache: (cache: DownloadsCache) => void;
   clearCache: () => void;
   clearDownloadsCache: () => void;
+  updateAudioSettings: (settings: Partial<AudioSettings>) => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -106,6 +115,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     currentIndex: 0,
     shuffle: false,
     repeat: false,
+  },
+  audioSettings: {
+    crossfadeEnabled: true,
+    crossfadeDuration: 2000, // 2 segundos
+    prebufferTime: 10000, // 10 segundos
   },
   addServer: (server) => set((state) => ({ servers: [...state.servers, server] })),
   removeServer: (id) => set((state) => ({ servers: state.servers.filter(s => s.id !== id) })),
@@ -132,6 +146,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   setDownloadsCache: (cache) => set(() => ({ downloadsCache: cache })),
   clearCache: () => set(() => ({ discoverCache: null, libraryCache: null, downloadsCache: null })),
   clearDownloadsCache: () => set(() => ({ downloadsCache: null })),
+  updateAudioSettings: (settings) => set((state) => ({ 
+    audioSettings: { ...state.audioSettings, ...settings } 
+  })),
   loadServers: async () => {
     const servers = await getServersFromDB();
     set({ servers });

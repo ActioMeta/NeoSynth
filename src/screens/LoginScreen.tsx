@@ -2,12 +2,15 @@
 import React, { useState } from 'react';
 import { addServerToDB } from '../database/servers';
 import { pingServer } from '../services/subsonic';
-import { View, Text, TextInput, StyleSheet, Alert, TouchableOpacity } from 'react-native';
+import { View, Text, TextInput, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useCustomAlert } from '../hooks/useCustomAlert';
+import CustomAlert from '../components/CustomAlert';
 
 
 export default function LoginScreen({ onServerAdded, navigation }: { onServerAdded?: () => void; navigation?: any }) {
+  const { showAlert, alertProps } = useCustomAlert();
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [username, setUsername] = useState('');
@@ -17,12 +20,12 @@ export default function LoginScreen({ onServerAdded, navigation }: { onServerAdd
 
   const handleSave = async () => {
     if (!name || !url || !username || !password) {
-      Alert.alert('Completa todos los campos');
+      showAlert('Error', 'Completa todos los campos');
       return;
     }
     // Validar formato de URL
     if (!/^https?:\/\//.test(url)) {
-      Alert.alert('La URL debe empezar con http:// o https://');
+      showAlert('Error', 'La URL debe empezar con http:// o https://');
       return;
     }
     setLoading(true);
@@ -30,7 +33,7 @@ export default function LoginScreen({ onServerAdded, navigation }: { onServerAdd
       // Probar conexión al servidor
       await pingServer({ url, username, password });
     } catch (e: any) {
-      Alert.alert('No se pudo conectar al servidor', e?.message || String(e));
+      showAlert('Error de conexión', e?.message || String(e));
       setLoading(false);
       return;
     }
@@ -42,7 +45,7 @@ export default function LoginScreen({ onServerAdded, navigation }: { onServerAdd
         navigation.goBack();
       }
     } catch (e: any) {
-      Alert.alert('Error al guardar el servidor', e?.message || String(e));
+      showAlert('Error', e?.message || String(e));
     } finally {
       setLoading(false);
     }
@@ -106,6 +109,7 @@ export default function LoginScreen({ onServerAdded, navigation }: { onServerAdd
       >
         <Text style={styles.buttonText}>{loading ? 'Guardando...' : 'Guardar'}</Text>
       </TouchableOpacity>
+      <CustomAlert {...alertProps} />
   </SafeAreaView>
   );
 }

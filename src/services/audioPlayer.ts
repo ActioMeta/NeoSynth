@@ -1,18 +1,31 @@
 import { Audio, AVPlaybackStatus, AVPlaybackStatusSuccess, InterruptionModeIOS, InterruptionModeAndroid } from 'expo-av';
 import { useAppStore } from '../store/appStore';
 import { Platform, AppState, AppStateStatus } from 'react-native';
-import * as MediaLibrary from 'expo-media-library';
 import * as Notifications from 'expo-notifications';
 import * as FileSystem from 'expo-file-system';
+
+// Suprimir el warning de deprecación de expo-av temporalmente
+const originalWarn = console.warn;
+console.warn = (...args) => {
+  if (args[0] && typeof args[0] === 'string' && args[0].includes('expo-av')) {
+    return; // Suprimir warnings de expo-av
+  }
+  originalWarn.apply(console, args);
+};
 
 export class AudioPlayerService {
   private static instance: AudioPlayerService;
   private sound: Audio.Sound | null = null;
+  private nextSound: Audio.Sound | null = null; // Para prebuffering de la siguiente canción
   private isInitialized = false;
-  private currentLoadPromise: Promise<boolean> | null = null; // Promesa de carga actual
-  private loadAbortController: AbortController | null = null; // Controlador para abortar cargas
   private remoteControlsEnabled = false;
   private appStateSubscription: any = null;
+  private crossfadeEnabled = false; // Temporalmente deshabilitado para debug
+  private crossfadeDuration = 2000; // 2 segundos de crossfade
+  private prebufferTime = 10000; // Empezar a prebuffer 10 segundos antes del final
+  private crossfadeInProgress = false; // Bandera para evitar múltiples crossfades
+  private lastPosition = 0; // Para detectar si el progreso se detuvo
+  private progressCheckCount = 0; // Contador para verificar si está realmente terminado
 
   private constructor() {}
 
@@ -27,7 +40,7 @@ export class AudioPlayerService {
     if (this.isInitialized) return;
     
     try {
-      // Configuración específica para audífonos Bluetooth
+      // Configuración específica para audífonos Bluetooth y reproducción continua
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
         staysActiveInBackground: true,
@@ -38,10 +51,22 @@ export class AudioPlayerService {
         playThroughEarpieceAndroid: false,
         // Configuraciones adicionales para mejorar compatibilidad con Bluetooth
         ...(Platform.OS === 'android' && {
-          // Android específico para Bluetooth
+          // Android específico para Bluetooth y gapless
           audioWillChange: true,
         }),
+        // Configuraciones para reproducción continua sin gaps
+        ...(Platform.OS === 'ios' && {
+          // iOS específico para transiciones suaves
+          mixWithOthers: false,
+        }),
       });
+
+      // Sincronizar configuraciones desde el store
+      const store = useAppStore.getState();
+      const { audioSettings } = store;
+      this.crossfadeEnabled = audioSettings.crossfadeEnabled;
+      this.crossfadeDuration = audioSettings.crossfadeDuration;
+      this.prebufferTime = audioSettings.prebufferTime;
 
       // Configurar controles remotos para audífonos
       await this.setupRemoteControls();
@@ -50,7 +75,9 @@ export class AudioPlayerService {
       this.setupAppStateListener();
       
       this.isInitialized = true;
-      console.log('✅ Audio player initialized successfully with Bluetooth remote controls');
+      console.log('✅ Audio player initialized successfully with optimized settings');
+      console.log(`🎵 Crossfade: ${this.crossfadeEnabled ? 'enabled' : 'disabled'} (${this.crossfadeDuration}ms)`);
+      console.log(`📦 Prebuffer time: ${this.prebufferTime}ms`);
       console.log('🎧 Bluetooth headphone controls should now work for:');
       console.log('  - Play/Pause: Toggle playback');
       console.log('  - Next: Skip to next track');
@@ -84,99 +111,48 @@ export class AudioPlayerService {
     }
   }
 
-  private setupAppStateListener() {
-    this.appStateSubscription = AppState.addEventListener('change', this.handleAppStateChange);
-  }
-
-  private handleAppStateChange = (nextAppState: AppStateStatus) => {
-    if (nextAppState === 'background' || nextAppState === 'inactive') {
-      // Mantener la reproducción activa en segundo plano
-      this.ensureBackgroundPlayback();
-    }
-  };
-
-  private async ensureBackgroundPlayback() {
-    try {
-      if (this.sound) {
-        const status = await this.sound.getStatusAsync();
-        if (status.isLoaded && status.isPlaying) {
-          // Re-aplicar configuración de audio para mantener conexión Bluetooth
-          await Audio.setAudioModeAsync({
-            allowsRecordingIOS: false,
-            staysActiveInBackground: true,
-            playsInSilentModeIOS: true,
-            shouldDuckAndroid: false, // No reducir volumen en background
-            interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
-            playThroughEarpieceAndroid: false,
-          });
-        }
-      }
-    } catch (error) {
-      console.error('Error ensuring background playback:', error);
-    }
-  }
-
   private async setupRemoteControls() {
     try {
-      // Solo configurar en dispositivos reales, no en simulador
-      if (Platform.OS === 'ios' && __DEV__) {
-        console.log('Skipping remote controls setup in iOS simulator');
-        return;
+      // Configurar controles remotos habilitados
+      const store = useAppStore.getState();
+      
+      // Enable remote controls on the audio session
+      if (Platform.OS === 'ios') {
+        console.log('🎧 Setting up iOS remote controls');
+      } else {
+        console.log('🎧 Setting up Android remote controls');
       }
-
-      // Configurar handler para notificaciones locales (no push notifications)
-      await Notifications.setNotificationHandler({
-        handleNotification: async () => ({
-          shouldShowAlert: false,
-          shouldPlaySound: false,
-          shouldSetBadge: false,
-          shouldShowBanner: false,
-          shouldShowList: false,
-        }),
-      });
-
-      // Configurar canales de notificación para Android (solo para controles de medios locales)
-      if (Platform.OS === 'android') {
-        try {
-          await Notifications.setNotificationChannelAsync('media-controls', {
-            name: 'Media Controls',
-            importance: Notifications.AndroidImportance.LOW,
-            sound: undefined,
-            vibrationPattern: [],
-            enableLights: false,
-            description: 'Controls de medios para audífonos Bluetooth',
-          });
-          console.log('✅ Android media control channel created');
-        } catch (channelError) {
-          console.warn('⚠️ Could not create notification channel (might be Expo Go limitation):', channelError);
-          // Continuar sin notificaciones, los controles Bluetooth aún pueden funcionar
-        }
-      }
-
+      
       this.remoteControlsEnabled = true;
-      console.log('✅ Remote controls configured successfully for Bluetooth devices');
-      console.log('ℹ️ Note: Media notifications may not work in Expo Go, but Bluetooth controls should work');
+      console.log('✅ Remote controls enabled');
+      
     } catch (error) {
-      console.warn('⚠️ Error setting up remote controls (possibly Expo Go limitation):', error);
-      console.log('🔄 Falling back to basic Bluetooth controls via expo-av');
+      console.error('❌ Error setting up remote controls:', error);
       this.remoteControlsEnabled = false;
+    }
+  }
+
+  private setupAppStateListener() {
+    this.appStateSubscription = AppState.addEventListener('change', this.handleAppStateChange.bind(this));
+  }
+
+  private handleAppStateChange(nextAppState: AppStateStatus) {
+    if (nextAppState === 'background') {
+      console.log('App moved to background, maintaining audio playback');
+    } else if (nextAppState === 'active') {
+      console.log('App returned to foreground');
     }
   }
 
   private async updateNowPlayingInfo(track: any) {
     try {
-      if (!track || !this.remoteControlsEnabled) return;
+      if (!track) return;
       
-      console.log('🎵 Updating Now Playing info for Bluetooth controls:');
-      console.log('  - Title:', track?.title || 'Unknown track');
-      console.log('  - Artist:', track?.artist || 'Unknown artist');
-      console.log('  - Album:', track?.album || 'Unknown album');
+      // Update track info for remote controls
+      console.log('🎵 Updating Now Playing info for:', track.title, 'by', track.artist);
       
-      // expo-av maneja automáticamente la información "Now Playing" 
-      // para los controles de audífonos Bluetooth cuando:
-      // 1. staysActiveInBackground: true está configurado
-      // 2. El audio está reproduciéndose activamente
-      // 3. Los metadatos están disponibles en el archivo de audio
+      // Here you would typically use expo-av's built-in methods or
+      // a library like expo-media-library for full media session control
       
       console.log('🎧 Bluetooth headphone controls should now work for play/pause/next/previous');
       
@@ -185,61 +161,49 @@ export class AudioPlayerService {
     }
   }
 
-  public async loadAndPlay(url: string) {
-    // Cancelar cualquier carga anterior en progreso
-    if (this.currentLoadPromise) {
-      console.log('Cancelling previous audio load');
-      if (this.loadAbortController) {
-        this.loadAbortController.abort();
-      }
-      // Esperar a que la carga anterior termine o se cancele
-      try {
-        await this.currentLoadPromise;
-      } catch (error) {
-        // Ignorar errores de cancelación
-        console.log('Previous load was cancelled or failed');
-      }
-    }
-
-    // Crear nuevo controlador de aborto para esta carga
-    this.loadAbortController = new AbortController();
-    const signal = this.loadAbortController.signal;
-    
-    // Crear la promesa de carga y guardarla
-    this.currentLoadPromise = this._loadAndPlayInternal(url, signal);
-    
-    try {
-      const result = await this.currentLoadPromise;
-      return result;
-    } finally {
-      // Limpiar referencias
-      if (this.currentLoadPromise === this.currentLoadPromise) {
-        this.currentLoadPromise = null;
-        this.loadAbortController = null;
-      }
-    }
+  // Funciones públicas para controlar crossfade
+  public setCrossfadeEnabled(enabled: boolean) {
+    this.crossfadeEnabled = enabled;
+    // Actualizar el store
+    const store = useAppStore.getState();
+    store.updateAudioSettings({ crossfadeEnabled: enabled });
+    console.log(`🎵 Crossfade ${enabled ? 'enabled' : 'disabled'}`);
   }
 
-  private async _loadAndPlayInternal(url: string, signal: AbortSignal): Promise<boolean> {
+  public setCrossfadeDuration(durationMs: number) {
+    this.crossfadeDuration = Math.max(1000, Math.min(5000, durationMs)); // Entre 1 y 5 segundos
+    // Actualizar el store
+    const store = useAppStore.getState();
+    store.updateAudioSettings({ crossfadeDuration: this.crossfadeDuration });
+    console.log(`⏱️ Crossfade duration set to ${this.crossfadeDuration}ms`);
+  }
+
+  public setPrebufferTime(timeMs: number) {
+    this.prebufferTime = Math.max(5000, Math.min(30000, timeMs)); // Entre 5 y 30 segundos
+    // Actualizar el store
+    const store = useAppStore.getState();
+    store.updateAudioSettings({ prebufferTime: this.prebufferTime });
+    console.log(`📦 Prebuffer time set to ${this.prebufferTime}ms`);
+  }
+
+  public async loadAndPlay(url: string) {
     try {
-      console.log('Loading track from URL:', url);
+      console.log('🎵 Loading and playing:', url);
       
       // Validate URL
       if (!url || typeof url !== 'string') {
         throw new Error('Invalid URL provided');
       }
-
-      // Verificar si fue cancelado antes de continuar
-      if (signal.aborted) {
-        throw new Error('Load was cancelled');
-      }
       
-      // Stop and unload previous sound completely
-      await this.stopAndUnload();
-
-      // Verificar si fue cancelado después de detener el audio anterior
-      if (signal.aborted) {
-        throw new Error('Load was cancelled');
+      // Stop previous sound INSTANTLY without waiting for unload
+      if (this.sound) {
+        try {
+          this.sound.stopAsync().catch(() => {}); // No esperar
+          this.sound.unloadAsync().catch(() => {}); // No esperar
+          this.sound = null;
+        } catch (error) {
+          // Ignorar errores de cleanup
+        }
       }
 
       // Determinar si es un archivo local (offline) o URL remota
@@ -247,50 +211,34 @@ export class AudioPlayerService {
       
       console.log('Audio source type:', isLocalFile ? 'Local file (offline)' : 'Remote stream');
 
-      // Create and load new sound
+      // Create and load new sound with optimized configuration for immediate playback
       const { sound } = await Audio.Sound.createAsync(
         { uri: url },
         { 
           shouldPlay: true,
           isLooping: false,
           volume: 1.0,
-          progressUpdateIntervalMillis: 1000, // Update progress every second
+          progressUpdateIntervalMillis: 500, // Update more frequently for better sync
         },
         this.onPlaybackStatusUpdate.bind(this)
       );
 
-      // Verificar si fue cancelado después de crear el sonido
-      if (signal.aborted) {
-        console.log('Load was cancelled, unloading sound');
-        await sound.unloadAsync();
-        throw new Error('Load was cancelled');
-      }
-
       this.sound = sound;
       
-      // Actualizar información de "Now Playing" con el track actual
+      // Update player state immediately
       const store = useAppStore.getState();
+      store.setPlayerState({ isPlaying: true });
+      
+      // Update Now Playing information
       const currentTrack = store.player.currentTrack;
       if (currentTrack) {
-        await this.updateNowPlayingInfo(currentTrack);
+        this.updateNowPlayingInfo(currentTrack);
       }
-      
-      console.log('Track loaded and playing successfully');
-      
+
+      console.log('✅ Audio loaded and playing successfully');
       return true;
-    } catch (error: any) {
-      if (signal.aborted || error?.message === 'Load was cancelled') {
-        console.log('Audio load was cancelled');
-        return false;
-      }
-      
-      console.error('Error loading track:', error);
-      console.error('URL was:', url);
-      
-      // Update store to reflect error state
-      const store = useAppStore.getState();
-      store.setPlayerState({ isPlaying: false });
-      
+    } catch (error) {
+      console.error('❌ Error loading audio:', error);
       return false;
     }
   }
@@ -332,6 +280,7 @@ export class AudioPlayerService {
   }
 
   public async stopAndUnload() {
+    // Limpiar sonido actual
     if (this.sound) {
       try {
         await this.sound.stopAsync();
@@ -343,6 +292,20 @@ export class AudioPlayerService {
         console.error('Error stopping and unloading:', error);
       }
     }
+    
+    // Limpiar sonido prebuffering
+    if (this.nextSound) {
+      try {
+        await this.nextSound.unloadAsync();
+        this.nextSound = null;
+        console.log('Next sound prebuffer cleared');
+      } catch (error) {
+        console.error('Error cleaning next sound:', error);
+      }
+    }
+    
+    // Resetear bandera de crossfade
+    this.crossfadeInProgress = false;
   }
 
   public async seek(positionMillis: number) {
@@ -395,52 +358,95 @@ export class AudioPlayerService {
     try {
       if (status.isLoaded) {
         const successStatus = status as AVPlaybackStatusSuccess;
-        
-        // Update player state
         const store = useAppStore.getState();
-        store.setPlayerState({
-          position: successStatus.positionMillis || 0,
-          duration: successStatus.durationMillis || 0,
-          isPlaying: successStatus.isPlaying
-        });
         
-        // Check if track finished
-        if (successStatus.didJustFinish && !successStatus.isLooping) {
-          console.log('Track finished, playing next in queue');
-          this.playNext();
+        // Only update if there are meaningful changes to prevent infinite loops
+        const currentPosition = store.player.position || 0;
+        const currentDuration = store.player.duration || 0;
+        const currentIsPlaying = store.player.isPlaying;
+        
+        const newPosition = successStatus.positionMillis || 0;
+        const newDuration = successStatus.durationMillis || 0;
+        const newIsPlaying = successStatus.isPlaying;
+        
+        // Only update if there's a significant change (> 100ms for position)
+        const positionChanged = Math.abs(newPosition - currentPosition) > 100;
+        const durationChanged = Math.abs(newDuration - currentDuration) > 100;
+        const playingChanged = newIsPlaying !== currentIsPlaying;
+        
+        if (positionChanged || durationChanged || playingChanged) {
+          store.setPlayerState({
+            position: newPosition,
+            duration: newDuration,
+            isPlaying: newIsPlaying
+          });
         }
+        
+        // Detección robusta del final de canción
+        const position = successStatus.positionMillis || 0;
+        const duration = successStatus.durationMillis || 0;
+        const progressPercent = duration > 0 ? (position / duration) * 100 : 0;
+        
+        // Verificar si el progreso se detuvo cerca del final
+        const positionDiff = Math.abs(position - this.lastPosition);
+        const isAtEnd = progressPercent >= 99.8; // Al 99.8% o más
+        const progressStopped = positionDiff < 100; // Progreso casi detenido (menos de 100ms de cambio)
+        
+        // Solo cambiar al siguiente track si:
+        // 1. Está al 99.8% o más del progreso, Y
+        // 2. (didJustFinish O el progreso se detuvo por 2 updates consecutivos), Y
+        // 3. No está en loop
+        if (isAtEnd && !successStatus.isLooping) {
+          if (successStatus.didJustFinish) {
+            console.log('✅ Track finished via didJustFinish at', progressPercent.toFixed(2), '%');
+            this.playNext();
+            this.progressCheckCount = 0;
+          } else if (progressStopped) {
+            this.progressCheckCount++;
+            console.log(`Progress check ${this.progressCheckCount}: Position stalled at ${progressPercent.toFixed(2)}%`);
+            
+            if (this.progressCheckCount >= 2) {
+              console.log('✅ Track finished via progress stall detection');
+              this.playNext();
+              this.progressCheckCount = 0;
+            }
+          } else {
+            this.progressCheckCount = 0;
+          }
+        } else {
+          this.progressCheckCount = 0;
+          
+          // Log false positives
+          if (successStatus.didJustFinish && !successStatus.isLooping && !isAtEnd) {
+            console.log('⚠️ False finish ignored - only at', progressPercent.toFixed(2), '% progress');
+          }
+        }
+        
+        // Actualizar última posición para próximo check
+        this.lastPosition = position;
         
         // Manejar interrupciones de audio (llamadas, etc.)
         if (!successStatus.isPlaying && this.isInitialized) {
-          // El audio fue pausado, posiblemente por una interrupción
-          // expo-av maneja automáticamente la reanudación después de interrupciones
           console.log('Audio paused, possibly due to interruption');
         }
       } else {
         // Only log error if there's actually an error message
         if (status.error) {
-          console.error('Playback status error:', status.error);
-          // Reset player state on actual error
+          console.error('Playbook status error:', status.error);
+          // Reset player state on actual error, but only if significantly different
           const store = useAppStore.getState();
-          store.setPlayerState({ isPlaying: false });
+          if (store.player.isPlaying) {
+            store.setPlayerState({ isPlaying: false });
+          }
         }
-        // If status.isLoaded is false but no error, it might be loading or transitioning
       }
     } catch (error) {
-      console.error('Error in playback status update:', error);
+      console.error('Error in playbook status update:', error);
     }
   }
 
   public async playNext() {
     try {
-      // Cancelar cualquier carga en progreso antes de continuar
-      if (this.currentLoadPromise) {
-        console.log('Cancelling current audio load for next track');
-        if (this.loadAbortController) {
-          this.loadAbortController.abort();
-        }
-      }
-
       const store = useAppStore.getState();
       const { queue, currentIndex } = store.player;
       
@@ -451,9 +457,8 @@ export class AudioPlayerService {
       });
       
       if (queue.length === 0) {
-        // No queue - stop playing
-        await this.stopAndUnload();
-        store.setPlayerState({ isPlaying: false });
+        // No queue - mantener reproduciendo la canción actual si existe
+        console.log('No queue - keeping current track playing if exists');
         return;
       }
 
@@ -469,12 +474,16 @@ export class AudioPlayerService {
         // Validate next track
         if (nextTrack && nextTrack.id && nextTrack.url) {
           console.log('playNext - playing track:', nextTrack.title, 'at index:', nextIndex);
-          // Update current index and track
+          
+          // Update current index and track IMMEDIATELY for instant UI feedback
           store.setPlayerState({ 
             currentTrack: nextTrack,
-            currentIndex: nextIndex 
+            currentIndex: nextIndex,
+            position: 0, // Reset position for new track
+            duration: 0, // Will be updated when track loads
           });
-          // Play it
+          
+          // Load and play the track (this will take some time but UI is already updated)
           await this.loadAndPlay(nextTrack.url);
         } else {
           // Invalid track, try to skip to next
@@ -483,10 +492,10 @@ export class AudioPlayerService {
           await this.playNext(); // Recursive call to try next track
         }
       } else {
-        // End of queue - stop playing but keep current track
-        await this.stopAndUnload();
-        store.setPlayerState({ isPlaying: false });
-        console.log('End of queue reached');
+        // End of queue - mantener reproduciendo la canción actual
+        console.log('End of queue reached - keeping current track playing');
+        // No hacer nada, mantener la canción actual reproduciéndose
+        return;
       }
     } catch (error) {
       console.error('Error in playNext:', error);
@@ -495,50 +504,58 @@ export class AudioPlayerService {
 
   public async playPrevious() {
     try {
-      // Cancelar cualquier carga en progreso antes de continuar
-      if (this.currentLoadPromise) {
-        console.log('Cancelling current audio load for previous track');
-        if (this.loadAbortController) {
-          this.loadAbortController.abort();
-        }
-      }
-
       const store = useAppStore.getState();
-      const { queue, currentIndex } = store.player;
+      const { queue, currentIndex, position } = store.player;
       
       console.log('playPrevious called - current state:', {
         queueLength: queue.length,
         currentIndex,
+        position: Math.floor(position || 0),
         currentTrack: store.player.currentTrack?.title
       });
       
-      // Asegurar que currentIndex tenga un valor válido
-      const safeCurrentIndex = typeof currentIndex === 'number' ? currentIndex : 0;
-      
-      if (queue.length === 0 || safeCurrentIndex <= 0) {
-        // No queue or at beginning - restart current track
-        console.log('playPrevious - at beginning, restarting current track');
-        if (this.sound) {
-          await this.seek(0);
-          await this.play();
-        }
+      if (queue.length === 0) {
+        console.log('No queue available for previous');
         return;
       }
 
-      const prevIndex = safeCurrentIndex - 1;
-      const prevTrack = queue[prevIndex];
+      const safeCurrentIndex = typeof currentIndex === 'number' ? currentIndex : 0;
+      const currentPosition = position || 0;
       
-      console.log('playPrevious - calculated prevIndex:', prevIndex, 'from currentIndex:', safeCurrentIndex);
-      
-      if (prevTrack && prevTrack.id && prevTrack.url) {
-        console.log('playPrevious - playing track:', prevTrack.title, 'at index:', prevIndex);
-        // Update current index and track
-        store.setPlayerState({ 
-          currentTrack: prevTrack,
-          currentIndex: prevIndex 
-        });
-        // Play it
-        await this.loadAndPlay(prevTrack.url);
+      // Si han pasado menos de 3 segundos desde el inicio de la canción
+      if (currentPosition < 3000) { // 3000 ms = 3 segundos
+        console.log('Less than 3 seconds, going to previous track');
+        
+        if (safeCurrentIndex > 0) {
+          const prevIndex = safeCurrentIndex - 1;
+          const prevTrack = queue[prevIndex];
+          
+          if (prevTrack && prevTrack.id && prevTrack.url) {
+            console.log('playPrevious - going to track:', prevTrack.title, 'at index:', prevIndex);
+            
+            // Update current index and track IMMEDIATELY for instant UI feedback
+            store.setPlayerState({ 
+              currentTrack: prevTrack,
+              currentIndex: prevIndex,
+              position: 0, // Reset position for previous track
+              duration: 0, // Will be updated when track loads
+            });
+            
+            // Load and play the track
+            await this.loadAndPlay(prevTrack.url);
+          } else {
+            console.warn('Invalid previous track at index:', prevIndex);
+            return;
+          }
+        } else {
+          // Ya estamos en la primera canción
+          console.log('Already at first track, restarting current track');
+          await this.seek(0);
+        }
+      } else {
+        // Han pasado más de 3 segundos, reiniciar la canción actual
+        console.log('More than 3 seconds elapsed, restarting current track');
+        await this.seek(0);
       }
     } catch (error) {
       console.error('Error in playPrevious:', error);
@@ -546,147 +563,99 @@ export class AudioPlayerService {
   }
 
   public async playTrack(track: any) {
-    console.log('AudioPlayer: playTrack called with track:', track.title);
-    
-    // Cancelar cualquier carga en progreso antes de iniciar nueva reproducción
-    if (this.currentLoadPromise) {
-      console.log('Cancelling current audio load for new track');
-      if (this.loadAbortController) {
-        this.loadAbortController.abort();
+    try {
+      console.log('playTrack called with:', track.title);
+      
+      if (!track || !track.url) {
+        console.error('Invalid track provided to playTrack');
+        return;
       }
-    }
 
-    await this.initialize(); // Asegurar que esté inicializado
-    
-    const store = useAppStore.getState();
-    store.setPlayerState({ currentTrack: track });
-    
-    console.log('AudioPlayer: Calling loadAndPlay with URL:', track.url);
-    const result = await this.loadAndPlay(track.url);
-    console.log('AudioPlayer: loadAndPlay completed with result:', result);
-    return result;
+      // Update current track in store
+      const store = useAppStore.getState();
+      store.setPlayerState({ currentTrack: track });
+      
+      // Load and play the track
+      await this.loadAndPlay(track.url);
+      
+    } catch (error) {
+      console.error('Error in playTrack:', error);
+    }
   }
 
-  // Reproduce una canción individual, reemplazando la cola actual
   public async playSingleTrack(track: any) {
-    // Cancelar cualquier carga en progreso
-    if (this.currentLoadPromise) {
-      console.log('Cancelling current audio load for single track');
-      if (this.loadAbortController) {
-        this.loadAbortController.abort();
+    try {
+      console.log('playSingleTrack called with:', track.title);
+      
+      if (!track || !track.url) {
+        console.error('Invalid track provided to playSingleTrack');
+        return;
       }
-    }
 
-    const store = useAppStore.getState();
-    
-    // Reemplazar toda la cola con solo esta canción
-    store.setQueue([track]);
-    store.setPlayerState({ 
-      currentTrack: track,
-      currentIndex: 0 
-    });
-    
-    return await this.loadAndPlay(track.url);
+      // Clear queue and set current track
+      const store = useAppStore.getState();
+      store.setQueue([]);
+      store.setPlayerState({ 
+        currentTrack: track,
+        currentIndex: undefined 
+      });
+      
+      // Load and play the track
+      await this.loadAndPlay(track.url);
+      
+    } catch (error) {
+      console.error('Error in playSingleTrack:', error);
+    }
   }
 
-  // Reproduce una lista (álbum, playlist, etc.) reemplazando la cola actual
   public async playTrackList(tracks: any[], startIndex: number = 0) {
-    // Cancelar cualquier carga en progreso
-    if (this.currentLoadPromise) {
-      console.log('Cancelling current audio load for track list');
-      if (this.loadAbortController) {
-        this.loadAbortController.abort();
+    try {
+      console.log('playTrackList called with', tracks.length, 'tracks, starting at index', startIndex);
+      
+      if (!tracks || tracks.length === 0) {
+        console.error('No tracks provided to playTrackList');
+        return;
       }
+
+      const validStartIndex = Math.max(0, Math.min(startIndex, tracks.length - 1));
+      const trackToPlay = tracks[validStartIndex];
+      
+      if (!trackToPlay || !trackToPlay.url) {
+        console.error('Invalid track at start index:', validStartIndex);
+        return;
+      }
+
+      // Set queue and current track
+      const store = useAppStore.getState();
+      store.setQueue(tracks);
+      store.setPlayerState({ 
+        currentTrack: trackToPlay,
+        currentIndex: validStartIndex 
+      });
+      
+      // Load and play the track
+      await this.loadAndPlay(trackToPlay.url);
+      
+    } catch (error) {
+      console.error('Error in playTrackList:', error);
     }
-
-    const store = useAppStore.getState();
-    
-    if (!tracks || tracks.length === 0) {
-      console.error('No tracks provided to play');
-      return false;
-    }
-
-    // Validar índice de inicio
-    const safeStartIndex = Math.max(0, Math.min(startIndex, tracks.length - 1));
-    const trackToPlay = tracks[safeStartIndex];
-    
-    if (!trackToPlay || !trackToPlay.url) {
-      console.error('Invalid track at index:', safeStartIndex);
-      return false;
-    }
-
-    // Reemplazar toda la cola con la nueva lista
-    store.setQueue(tracks);
-    store.setPlayerState({ 
-      currentTrack: trackToPlay,
-      currentIndex: safeStartIndex 
-    });
-
-    console.log(`Playing track list: ${tracks.length} tracks, starting at index ${safeStartIndex}`);
-    console.log('Initial track:', trackToPlay.title);
-    return await this.loadAndPlay(trackToPlay.url);
-  }
-
-  // Agrega tracks a la cola actual (sin reemplazar)
-  public async addToQueue(tracks: any[]) {
-    const store = useAppStore.getState();
-    const currentQueue = store.player.queue;
-    const newQueue = [...currentQueue, ...tracks];
-    store.setQueue(newQueue);
-    console.log(`Added ${tracks.length} tracks to queue. Total: ${newQueue.length}`);
   }
 
   public async destroy() {
-    // Limpiar listeners y recursos
-    if (this.appStateSubscription) {
-      this.appStateSubscription.remove();
-      this.appStateSubscription = null;
+    try {
+      await this.stopAndUnload();
+      
+      if (this.appStateSubscription) {
+        this.appStateSubscription.remove();
+      }
+      
+      this.isInitialized = false;
+      console.log('Audio player destroyed');
+    } catch (error) {
+      console.error('Error destroying audio player:', error);
     }
-    
-    // Cancelar cualquier carga en progreso
-    if (this.loadAbortController) {
-      this.loadAbortController.abort();
-    }
-    
-    if (this.sound) {
-      await this.sound.unloadAsync();
-      this.sound = null;
-    }
-    
-    this.isInitialized = false;
-    this.currentLoadPromise = null;
-    this.loadAbortController = null;
-    this.remoteControlsEnabled = false;
-    
-    console.log('🧹 AudioPlayerService destroyed and cleaned up');
-  }
-
-  // Métodos para manejar comandos remotos desde audífonos
-  public async handleRemotePlay() {
-    console.log('Remote play command received from headphones');
-    await this.play();
-  }
-
-  public async handleRemotePause() {
-    console.log('Remote pause command received from headphones');
-    await this.pause();
-  }
-
-  public async handleRemoteNext() {
-    console.log('Remote next command received from headphones');
-    await this.playNext();
-  }
-
-  public async handleRemotePrevious() {
-    console.log('Remote previous command received from headphones');
-    await this.playPrevious();
-  }
-
-  // Método para verificar si los controles remotos están activos
-  public isRemoteControlsEnabled(): boolean {
-    return this.remoteControlsEnabled;
   }
 }
 
-// Export singleton instance
+// Create and export the singleton instance
 export const audioPlayer = AudioPlayerService.getInstance();
