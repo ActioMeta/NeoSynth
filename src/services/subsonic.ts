@@ -21,19 +21,55 @@ export async function subsonicRequest<T = any>(
     ...params,
   });
   const url = `${baseUrl}?${query.toString()}`;
+  console.log('🔗 Subsonic request URL:', baseUrl); // No loggeamos la URL completa por seguridad
+  console.log('🔗 Endpoint:', endpoint);
+  console.log('🔗 Base URL:', auth.url);
+  
   let res;
   try {
+    console.log('🔗 Iniciando fetch...');
     res = await fetch(url);
+    console.log('🔗 Fetch completado, status:', res.status);
   } catch (e) {
-    console.error('Error de red al conectar con Subsonic:', url, e);
-    throw new Error('No se pudo conectar al servidor: ' + url);
+    console.error('❌ Error de red al conectar con Subsonic:', auth.url, e);
+    throw new Error('No se pudo conectar al servidor. Verifica que la URL sea correcta y que el servidor esté disponible.');
   }
   if (!res.ok) {
     const text = await res.text();
-    console.error('Respuesta HTTP no OK:', res.status, url, text);
-    throw new Error(`Error en la petición Subsonic (HTTP ${res.status}): ${url}\n${text}`);
+    console.error('❌ Respuesta HTTP no OK:', res.status, text);
+    if (res.status === 401) {
+      throw new Error('Error de autenticación: Usuario o contraseña incorrectos');
+    } else if (res.status === 404) {
+      throw new Error('Servidor no encontrado. Verifica que la URL sea correcta');
+    } else if (res.status >= 500) {
+      throw new Error('Error del servidor. Intenta más tarde');
+    } else {
+      throw new Error(`Error en la petición (HTTP ${res.status})`);
+    }
   }
-  const data = await res.json();
+  
+  let data;
+  try {
+    data = await res.json();
+    console.log('🔗 Response data:', data);
+  } catch (e) {
+    console.error('❌ Error parsing JSON:', e);
+    throw new Error('Error al procesar la respuesta del servidor');
+  }
+  
+  // Verificar si hay errores en la respuesta de Subsonic
+  if (data['subsonic-response'] && data['subsonic-response'].status !== 'ok') {
+    const error = data['subsonic-response'].error;
+    console.error('❌ Subsonic error:', error);
+    if (error && error.code === 40) {
+      throw new Error('Usuario o contraseña incorrectos');
+    } else if (error && error.code === 50) {
+      throw new Error('Usuario no autorizado para esta operación');
+    } else {
+      throw new Error(error ? error.message : 'Error desconocido del servidor');
+    }
+  }
+  
   return data;
 }
 

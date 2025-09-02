@@ -25,16 +25,25 @@ export default function LoginScreen({ onServerAdded, navigation }: { onServerAdd
       showAlert('Error', 'Completa todos los campos');
       return;
     }
-    // Validar formato de URL
-    if (!/^https?:\/\//.test(url)) {
+    
+    // Limpiar y validar la URL
+    let cleanUrl = url.trim();
+    if (!/^https?:\/\//.test(cleanUrl)) {
       showAlert('Error', 'La URL debe empezar con http:// o https://');
       return;
     }
+    
+    // Remover slash final si existe
+    if (cleanUrl.endsWith('/')) {
+      cleanUrl = cleanUrl.slice(0, -1);
+    }
+    
     setLoading(true);
     try {
       // Probar conexión al servidor
-      console.log('🔗 Intentando conectar al servidor:', url);
-      const pingResult = await pingServer({ url, username, password });
+      console.log('🔗 Intentando conectar al servidor:', cleanUrl);
+      console.log('🔗 Usuario:', username);
+      const pingResult = await pingServer({ url: cleanUrl, username, password });
       console.log('✅ Ping exitoso:', pingResult);
     } catch (e: any) {
       console.error('❌ Error en ping:', e);
@@ -42,8 +51,9 @@ export default function LoginScreen({ onServerAdded, navigation }: { onServerAdd
       setLoading(false);
       return;
     }
+    
     try {
-      await addServerToDB({ name, url, username, password });
+      await addServerToDB({ name, url: cleanUrl, username, password });
       console.log('✅ Servidor agregado exitosamente');
       
       // Recargar la lista de servidores en el store
