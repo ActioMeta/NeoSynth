@@ -32,6 +32,7 @@
       "edgeToEdgeEnabled": true,
       "package": "com.neosynth.app",
       "versionCode": 4,
+      "usesCleartextTraffic": true,
       "permissions": [
         "RECORD_AUDIO",
         "MODIFY_AUDIO_SETTINGS",
