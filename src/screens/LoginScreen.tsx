@@ -41,12 +41,8 @@ export default function LoginScreen({ onServerAdded, navigation }: { onServerAdd
     setLoading(true);
     try {
       // Probar conexión al servidor
-      console.log('🔗 Intentando conectar al servidor:', cleanUrl);
-      console.log('🔗 Usuario:', username);
       const pingResult = await pingServer({ url: cleanUrl, username, password });
-      console.log('✅ Ping exitoso:', pingResult);
     } catch (e: any) {
-      console.error('❌ Error en ping:', e);
       showAlert('Error de conexión', e?.message || String(e));
       setLoading(false);
       return;
@@ -54,11 +50,9 @@ export default function LoginScreen({ onServerAdded, navigation }: { onServerAdd
     
     try {
       await addServerToDB({ name, url: cleanUrl, username, password });
-      console.log('✅ Servidor agregado exitosamente');
       
       // Recargar la lista de servidores en el store
       await loadServers();
-      console.log('✅ Lista de servidores actualizada');
       
       if (onServerAdded) {
         onServerAdded();
@@ -66,7 +60,6 @@ export default function LoginScreen({ onServerAdded, navigation }: { onServerAdd
         navigation.goBack();
       }
     } catch (e: any) {
-      console.error('Error al guardar servidor:', e);
       if (e.message && e.message.includes('Ya existe un servidor')) {
         showAlert('Servidor duplicado', 'Ya existe un servidor registrado con esta URL. Puedes usar el servidor existente o cambiar la URL.');
       } else {

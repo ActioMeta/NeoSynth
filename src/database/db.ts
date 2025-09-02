@@ -12,28 +12,22 @@ class DatabaseSemaphore {
 
   async acquire(): Promise<void> {
     return new Promise((resolve, reject) => {
-      console.log(`🔒 Semaphore acquire request - locked: ${this.isLocked}, queue length: ${this.queue.length}`);
       if (!this.isLocked) {
         this.isLocked = true;
-        console.log(`✅ Semaphore acquired immediately`);
         resolve();
       } else {
-        console.log(`⏳ Semaphore busy, adding to queue`);
         this.queue.push({ resolve, reject });
       }
     });
   }
 
   release(): void {
-    console.log(`🔓 Semaphore release - queue length: ${this.queue.length}`);
     if (this.queue.length > 0) {
       const next = this.queue.shift();
       if (next) {
-        console.log(`➡️ Semaphore passing to next in queue`);
         next.resolve();
       }
     } else {
-      console.log(`🔓 Semaphore fully released`);
       this.isLocked = false;
     }
   }
@@ -43,22 +37,16 @@ const dbSemaphore = new DatabaseSemaphore();
 
 // Wrapper para ejecutar operaciones de BD con semáforo
 export const withDatabaseLock = async <T>(operation: () => Promise<T>, retryCount = 0): Promise<T> => {
-  console.log(`🔄 withDatabaseLock: Starting operation (attempt ${retryCount + 1})`);
   await dbSemaphore.acquire();
   try {
-    console.log(`🔄 withDatabaseLock: Executing operation`);
     const result = await operation();
-    console.log(`✅ withDatabaseLock: Operation completed successfully`);
     return result;
   } catch (error) {
-    console.error(`❌ withDatabaseLock: Operation failed:`, error);
-    
     // Si el error es de conexión cerrada y no hemos reintentado demasiadas veces
     if (error instanceof Error && 
         (error.message.includes('closed resource') || 
          error.message.includes('database is closed')) &&
         retryCount < 2) {
-      console.log('🔄 Detected closed database, resetting instance and retrying...');
       dbInstance = null;
       isInitialized = false;
       
@@ -66,13 +54,11 @@ export const withDatabaseLock = async <T>(operation: () => Promise<T>, retryCoun
       dbSemaphore.release();
       
       // Reintentar la operación con una nueva conexión
-      console.log(`🔄 Retrying operation (attempt ${retryCount + 2})`);
       return withDatabaseLock(operation, retryCount + 1);
     }
     
     throw error;
   } finally {
-    console.log(`🔄 withDatabaseLock: Releasing semaphore`);
     dbSemaphore.release();
   }
 };
@@ -93,19 +79,15 @@ export const getDBConnection = async (): Promise<SQLite.SQLiteDatabase> => {
         isInitialized = false;
       }
     }
-
-    console.log('🔧 Initializing database...');
     
     try {
       // Abrir una nueva conexión
       dbInstance = await SQLite.openDatabaseAsync(DB_NAME);
-      console.log('📚 Database opened successfully');
       
       // Crear tablas
       await createTables();
       
       isInitialized = true;
-      console.log('✅ Database initialization complete');
       
       return dbInstance;
     } catch (error) {
